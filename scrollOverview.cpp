@@ -4468,10 +4468,13 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
     CBox        pillBox = {WORKSPACEBOX.x + PAD, WORKSPACEBOX.y + PAD, tex->m_size.x + PAD * 2.F, tex->m_size.y + PAD};
     pillBox.round();
 
+    // Black for regular workspaces, purple for special ones, at the same
+    // opacity; the selected card's pill is a little more opaque.
+    const float PILLALPHA = (isSelectedWorkspace(workspaceImage->pWorkspace) ? 0.75F : 0.55F) * WORKSPACEALPHA;
     CRectPassElement::SRectData pill;
     pill.box   = pillBox;
-    pill.color = CHyprColor{0.F, 0.F, 0.F, (isSelectedWorkspace(workspaceImage->pWorkspace) ? 0.75F : 0.55F) * WORKSPACEALPHA};
-    pill.round = sc<int>(pillBox.height / 2.F);
+    pill.color = workspaceImage->pWorkspace->m_isSpecialWorkspace ? CHyprColor{0.42F, 0.18F, 0.66F, PILLALPHA} : CHyprColor{0.F, 0.F, 0.F, PILLALPHA};
+    pill.round = sc<int>(std::round(pillBox.height * 0.3F));
     g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(pill));
 
     CTexPassElement::SRenderData text;
