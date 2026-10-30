@@ -122,22 +122,22 @@ static void showOverviewWorkspace(const PHLMONITOR& monitor, const PHLWORKSPACE&
     monitor->changeWorkspace(workspace, false, true, true);
 }
 
-// Card label: the number, plus the name when it differs ("7  games"); a
-// special workspace has a negative id, so it shows just its name without the
-// "special:" prefix.
+// Card label: "<number>: <name>", or just the number when the name is the
+// number. A special workspace has a negative id, so it gets "S: <name>" with
+// the "special:" prefix dropped.
 static std::string overviewWorkspaceLabel(const PHLWORKSPACE& workspace) {
     if (workspace->m_isSpecialWorkspace) {
         std::string_view name = workspace->m_name;
         if (name.starts_with("special:"))
             name.remove_prefix(8);
-        return std::string{name};
+        return "S: " + std::string{name};
     }
 
     const auto ID = std::to_string(workspace->m_id);
     if (workspace->m_name.empty() || workspace->m_name == ID)
         return ID;
 
-    return ID + "  " + workspace->m_name;
+    return ID + ": " + workspace->m_name;
 }
 
 // Whether a window dragged out of `from` may be dropped on `to`. Moving within

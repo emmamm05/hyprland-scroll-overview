@@ -60,7 +60,7 @@ ScrollOverview respects Hyprland's global `input.left_handed` and `input.touchpa
 
 ### Subcategory `label`
 
-Draws a small label in the top-left corner of each workspace card: the workspace number, followed by its name when it has one (`7  games`). Special workspaces show their name without the `special:` prefix. The selected card's label is slightly darker.
+Draws a small label in the top-left corner of each workspace card: `<number>: <name>` (`7: games`), or just the number when the workspace has no name of its own. Special workspaces show `S: <name>` without the `special:` prefix (`S: misc`). The selected card's label is slightly darker.
 
 | property | type | description | default |
 | --- | --- | --- | --- |
