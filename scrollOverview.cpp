@@ -122,22 +122,22 @@ static void showOverviewWorkspace(const PHLMONITOR& monitor, const PHLWORKSPACE&
     monitor->changeWorkspace(workspace, false, true, true);
 }
 
-// Card label: "<number>: <name>", or just the number when the name is the
-// number. A special workspace has a negative id, so it gets "S: <name>" with
-// the "special:" prefix dropped.
-static std::string overviewWorkspaceLabel(const PHLWORKSPACE& workspace) {
+// Card label badges, left to right: the number, then the name when it differs
+// from the number. A special workspace has a negative id, so it gets a single
+// badge with its name, "special:" prefix dropped.
+static std::vector<std::string> overviewWorkspaceLabels(const PHLWORKSPACE& workspace) {
     if (workspace->m_isSpecialWorkspace) {
         std::string_view name = workspace->m_name;
         if (name.starts_with("special:"))
             name.remove_prefix(8);
-        return "S: " + std::string{name};
+        return {std::string{name}};
     }
 
     const auto ID = std::to_string(workspace->m_id);
     if (workspace->m_name.empty() || workspace->m_name == ID)
-        return ID;
+        return {ID};
 
-    return ID + ": " + workspace->m_name;
+    return {ID, workspace->m_name};
 }
 
 // Whether a window dragged out of `from` may be dropped on `to`. Moving within
@@ -4452,36 +4452,41 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
 
     // Sized in logical px, independent of the overview scale, so the label
     // stays readable however far the cards are zoomed out.
-    const int  FONTPX = std::max(1, sc<int>(std::round(ScrollOverview::Config::getLabelFontSize(monitor) * monitor->m_scale)));
-    const auto TEXT   = overviewWorkspaceLabel(workspaceImage->pWorkspace);
-    const auto KEY    = TEXT + "\n" + std::to_string(FONTPX);
-
-    auto& tex = labelTextures[KEY];
-    if (!tex) {
-        const auto FONTFAMILY = ScrollOverview::Config::getValue<std::string>("misc:font_family");
-        tex = g_pHyprRenderer->renderText(TEXT, CHyprColor{1.F, 1.F, 1.F, 1.F}, FONTPX, false, FONTFAMILY, 0, 600);
-    }
-    if (!tex || !tex->ok())
-        return;
-
-    const float PAD     = std::round(FONTPX * 0.5F);
-    CBox        pillBox = {WORKSPACEBOX.x + PAD, WORKSPACEBOX.y + PAD, tex->m_size.x + PAD * 2.F, tex->m_size.y + PAD};
-    pillBox.round();
+    const int   FONTPX     = std::max(1, sc<int>(std::round(ScrollOverview::Config::getLabelFontSize(monitor) * monitor->m_scale)));
+    const float PAD        = std::round(FONTPX * 0.5F);
+    const auto  FONTFAMILY = ScrollOverview::Config::getValue<std::string>("misc:font_family");
 
     // Black for regular workspaces, purple for special ones, at the same
-    // opacity; the selected card's pill is a little more opaque.
+    // opacity; the selected card's badges are a little more opaque.
     const float PILLALPHA = (isSelectedWorkspace(workspaceImage->pWorkspace) ? 0.75F : 0.55F) * WORKSPACEALPHA;
-    CRectPassElement::SRectData pill;
-    pill.box   = pillBox;
-    pill.color = workspaceImage->pWorkspace->m_isSpecialWorkspace ? CHyprColor{0.42F, 0.18F, 0.66F, PILLALPHA} : CHyprColor{0.F, 0.F, 0.F, PILLALPHA};
-    pill.round = sc<int>(std::round(pillBox.height * 0.3F));
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(pill));
+    const auto  PILLCOLOR =
+        workspaceImage->pWorkspace->m_isSpecialWorkspace ? CHyprColor{0.42F, 0.18F, 0.66F, PILLALPHA} : CHyprColor{0.F, 0.F, 0.F, PILLALPHA};
 
-    CTexPassElement::SRenderData text;
-    text.tex = tex;
-    text.box = CBox{pillBox.x + PAD, pillBox.y + PAD / 2.F, tex->m_size.x, tex->m_size.y}.round();
-    text.a   = WORKSPACEALPHA;
-    g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(text));
+    float x = WORKSPACEBOX.x + PAD;
+    for (const auto& TEXT : overviewWorkspaceLabels(workspaceImage->pWorkspace)) {
+        auto& tex = labelTextures[TEXT + "\n" + std::to_string(FONTPX)];
+        if (!tex)
+            tex = g_pHyprRenderer->renderText(TEXT, CHyprColor{1.F, 1.F, 1.F, 1.F}, FONTPX, false, FONTFAMILY, 0, 600);
+        if (!tex || !tex->ok())
+            continue;
+
+        CBox pillBox = {x, WORKSPACEBOX.y + PAD, tex->m_size.x + PAD * 2.F, tex->m_size.y + PAD};
+        pillBox.round();
+
+        CRectPassElement::SRectData pill;
+        pill.box   = pillBox;
+        pill.color = PILLCOLOR;
+        pill.round = sc<int>(std::round(pillBox.height * 0.3F));
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(pill));
+
+        CTexPassElement::SRenderData text;
+        text.tex = tex;
+        text.box = CBox{pillBox.x + PAD, pillBox.y + PAD / 2.F, tex->m_size.x, tex->m_size.y}.round();
+        text.a   = WORKSPACEALPHA;
+        g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(text));
+
+        x += pillBox.width + PAD / 2.F;
+    }
 }
 
 void CScrollOverview::renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale, const Time::steady_tp& now) {
