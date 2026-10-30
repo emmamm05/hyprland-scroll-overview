@@ -122,6 +122,24 @@ static void showOverviewWorkspace(const PHLMONITOR& monitor, const PHLWORKSPACE&
     monitor->changeWorkspace(workspace, false, true, true);
 }
 
+// Card label: the number, plus the name when it differs ("7  games"); a
+// special workspace has a negative id, so it shows just its name without the
+// "special:" prefix.
+static std::string overviewWorkspaceLabel(const PHLWORKSPACE& workspace) {
+    if (workspace->m_isSpecialWorkspace) {
+        std::string_view name = workspace->m_name;
+        if (name.starts_with("special:"))
+            name.remove_prefix(8);
+        return std::string{name};
+    }
+
+    const auto ID = std::to_string(workspace->m_id);
+    if (workspace->m_name.empty() || workspace->m_name == ID)
+        return ID;
+
+    return ID + "  " + workspace->m_name;
+}
+
 // Whether a window dragged out of `from` may be dropped on `to`. Moving within
 // one workspace is always allowed; crossing into, out of or between special
 // workspaces needs special_workspace_drag. Pinned windows can't live on a
@@ -4419,6 +4437,50 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
     renderDropIndicator();
 }
 
+void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale) {
+    if (!ScrollOverview::Config::getLabelEnabled(monitor))
+        return;
+
+    const auto& workspaceImage = images[workspaceIdx];
+    if (!workspaceImage || !workspaceImage->pWorkspace)
+        return;
+
+    const auto WORKSPACEBOX   = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), workspaceOverviewOffset(workspaceIdx, activeIdx, workspacePitch), layout);
+    const auto WORKSPACEALPHA = workspaceOverviewAlpha(workspaceIdx);
+    if (WORKSPACEALPHA <= 0.001F || !overviewBoxIntersectsMonitor(WORKSPACEBOX, monitor))
+        return;
+
+    // Sized in logical px, independent of the overview scale, so the label
+    // stays readable however far the cards are zoomed out.
+    const int  FONTPX = std::max(1, sc<int>(std::round(ScrollOverview::Config::getLabelFontSize(monitor) * monitor->m_scale)));
+    const auto TEXT   = overviewWorkspaceLabel(workspaceImage->pWorkspace);
+    const auto KEY    = TEXT + "\n" + std::to_string(FONTPX);
+
+    auto& tex = labelTextures[KEY];
+    if (!tex) {
+        const auto FONTFAMILY = ScrollOverview::Config::getValue<std::string>("misc:font_family");
+        tex = g_pHyprRenderer->renderText(TEXT, CHyprColor{1.F, 1.F, 1.F, 1.F}, FONTPX, false, FONTFAMILY, 0, 600);
+    }
+    if (!tex || !tex->ok())
+        return;
+
+    const float PAD     = std::round(FONTPX * 0.5F);
+    CBox        pillBox = {WORKSPACEBOX.x + PAD, WORKSPACEBOX.y + PAD, tex->m_size.x + PAD * 2.F, tex->m_size.y + PAD};
+    pillBox.round();
+
+    CRectPassElement::SRectData pill;
+    pill.box   = pillBox;
+    pill.color = CHyprColor{0.F, 0.F, 0.F, (isSelectedWorkspace(workspaceImage->pWorkspace) ? 0.75F : 0.55F) * WORKSPACEALPHA};
+    pill.round = sc<int>(pillBox.height / 2.F);
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(pill));
+
+    CTexPassElement::SRenderData text;
+    text.tex = tex;
+    text.box = CBox{pillBox.x + PAD, pillBox.y + PAD / 2.F, tex->m_size.x, tex->m_size.y}.round();
+    text.a   = WORKSPACEALPHA;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(text));
+}
+
 void CScrollOverview::renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale, const Time::steady_tp& now) {
     auto*      dragOwner = g_pointerGrabOverview && g_pointerGrabOverview->dragActiveWindow ? g_pointerGrabOverview : this;
     const auto WINDOW    = getOverviewWindowToShow(dragOwner->dragActiveWindow.lock());
@@ -5512,6 +5574,10 @@ void CScrollOverview::render() {
 
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         renderWorkspaceLive(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
+    }
+
+    for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+        renderWorkspaceLabel(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE);
     }
 
     renderDraggedWindow(MONITOR, ACTIVEIDX, PITCH, SCALE, NOW);

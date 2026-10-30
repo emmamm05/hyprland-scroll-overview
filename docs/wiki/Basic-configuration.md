@@ -43,6 +43,7 @@ end)
 | special_workspace_drag | bool | allow dragging windows into, out of and between special workspaces. Without it a drop that would cross that boundary is refused and the window returns; moving windows within one workspace is unaffected. Pinned windows can never be dropped on a special workspace | `false` |
 | input | structure | input configuration subcategory; accepts a structure containing the properties listed below | see below |
 | shadow | structure | shadow configuration subcategory; accepts a structure containing the properties listed below | see below |
+| label | structure | workspace label subcategory; accepts a structure containing the properties listed below | see below |
 
 ### Subcategory `input`
 
@@ -56,6 +57,15 @@ ScrollOverview respects Hyprland's global `input.left_handed` and `input.touchpa
 | scrolling_mode | int | mouse wheel behavior: `0` layout-aware default, `1` inverted, `2` vertical scroll changes workspace and horizontal scroll changes columns, `3` vertical scroll changes columns and horizontal scroll changes workspace | `0` |
 | drag_mode | int | mouse drag behavior: `0` main button drags windows and middle button pans scrolling workspaces, `1` main button pans scrolling workspaces and middle button drags windows | `0` |
 | drag_threshold | int | movement threshold in pixels before a mouse press becomes drag/pan/resize instead of click; `0` disables the threshold | `10` |
+
+### Subcategory `label`
+
+Draws a small label in the top-left corner of each workspace card: the workspace number, followed by its name when it has one (`7  games`). Special workspaces show their name without the `special:` prefix. The selected card's label is slightly darker.
+
+| property | type | description | default |
+| --- | --- | --- | --- |
+| enabled | bool | label each workspace card | `false` |
+| font_size | int | label font size in logical px, [4–96]; not scaled with the overview, so it stays readable when zoomed out. Uses `misc:font_family` | `16` |
 
 ### Subcategory `shadow`
 

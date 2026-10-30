@@ -87,6 +87,7 @@ class CScrollOverview : public IOverview {
     void   renderBackdropBlurCache(PHLMONITOR monitor);
     void   renderWorkspaceBackground(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale, int wallpaperMode, const Time::steady_tp& now);
     void   renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale, int wallpaperMode, const Time::steady_tp& now);
+    void   renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale);
     bool   hasVisiblePrecomputedBlurWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale) const;
     void   renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, float renderScale, const Time::steady_tp& now, const CBox* workspaceBox = nullptr,
                              bool dragged = false);
@@ -257,6 +258,8 @@ class CScrollOverview : public IOverview {
     std::vector<SP<SWorkspaceImage>> images;
     std::vector<PHLWINDOWREF>        pinnedFloatingWindows;
     std::unordered_map<WORKSPACEID, PHLWINDOWREF> rememberedSelection;
+    // Rendered workspace labels, keyed by text and pixel size.
+    std::unordered_map<std::string, SP<Render::ITexture>> labelTextures;
     SWorkspaceInsertTransition       workspaceInsertTransition;
     PHLWORKSPACEREF                  pendingRemovedWorkspace;
     ScrollOverview::Config::ELayout  layout = ScrollOverview::Config::ELayout::VERTICAL;
