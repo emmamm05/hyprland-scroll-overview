@@ -96,6 +96,32 @@ static void restoreActiveWorkspaceVisibility() {
     }
 }
 
+// The workspace the overview treats as current on a monitor: an open special
+// workspace sits on top of the regular one, so with special_workspaces enabled
+// it is the one the user is looking at.
+static PHLWORKSPACE overviewCurrentWorkspace(const PHLMONITOR& monitor) {
+    if (!monitor)
+        return {};
+
+    if (monitor->m_activeSpecialWorkspace && ScrollOverview::Config::getSpecialWorkspaces(monitor))
+        return monitor->m_activeSpecialWorkspace;
+
+    return monitor->m_activeWorkspace;
+}
+
+// Make `workspace` the one shown on `monitor`. changeWorkspace() already opens
+// a special workspace, but switching to a regular one leaves an open special
+// on top of it, so close that first.
+static void showOverviewWorkspace(const PHLMONITOR& monitor, const PHLWORKSPACE& workspace) {
+    if (!monitor || !workspace || overviewCurrentWorkspace(monitor) == workspace)
+        return;
+
+    if (!workspace->m_isSpecialWorkspace && monitor->m_activeSpecialWorkspace && ScrollOverview::Config::getSpecialWorkspaces(monitor))
+        monitor->setSpecialWorkspace(nullptr);
+
+    monitor->changeWorkspace(workspace, false, true, true);
+}
+
 static void releaseTopLayerPointerButtons(uint32_t timeMs) {
     if (g_topLayerPointerButtons.empty())
         return;
@@ -1015,6 +1041,8 @@ CScrollOverview::~CScrollOverview() {
 CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITOR monitor_) : startedOn(startedOn_), swipe(swipe_) {
     const auto          PMONITOR = monitor_ ? monitor_ : (startedOn_ && startedOn_->m_monitor ? startedOn_->m_monitor.lock() : Desktop::focusState()->monitor());
     pMonitor                     = PMONITOR;
+    if (PMONITOR && startedOn == PMONITOR->m_activeWorkspace)
+        startedOn = overviewCurrentWorkspace(PMONITOR);
     layout                       = ScrollOverview::Config::getLayout(pMonitor.lock());
     if (layout == ScrollOverview::Config::ELayout::AUTO)
         layout = PMONITOR && PMONITOR->logicalBox().height > PMONITOR->logicalBox().width ? ScrollOverview::Config::ELayout::HORIZONTAL : ScrollOverview::Config::ELayout::VERTICAL;
@@ -1915,11 +1943,13 @@ void CScrollOverview::rebuildWorkspaceImages() {
     const auto viewportWorkspace = viewportCurrentWorkspace < images.size() ? images[viewportCurrentWorkspace]->pWorkspace : startedOn;
     const auto REMOVEDWORKSPACE  = pendingRemovedWorkspace.lock();
 
+    const bool SHOWSPECIAL       = ScrollOverview::Config::getSpecialWorkspaces(pMonitor.lock());
+
     images.clear();
 
     for (const auto& w : State::workspaceState()->workspaces()) {
         const auto WORKSPACE = w.lock();
-        if (!valid(WORKSPACE) || WORKSPACE->m_monitor != pMonitor || WORKSPACE->m_isSpecialWorkspace)
+        if (!valid(WORKSPACE) || WORKSPACE->m_monitor != pMonitor || (WORKSPACE->m_isSpecialWorkspace && !SHOWSPECIAL))
             continue;
 
         if (WORKSPACE == REMOVEDWORKSPACE)
@@ -1928,7 +1958,17 @@ void CScrollOverview::rebuildWorkspaceImages() {
         images.emplace_back(makeShared<SWorkspaceImage>(WORKSPACE));
     }
 
-    std::sort(images.begin(), images.end(), [](const auto& a, const auto& b) { return a->pWorkspace->m_id < b->pWorkspace->m_id; });
+    // Regular workspaces by id, then special ones by name. Special ids are
+    // negative, so sorting them by id alone would put them first.
+    std::sort(images.begin(), images.end(), [](const auto& a, const auto& b) {
+        const auto& A = a->pWorkspace;
+        const auto& B = b->pWorkspace;
+        if (A->m_isSpecialWorkspace != B->m_isSpecialWorkspace)
+            return !A->m_isSpecialWorkspace;
+        if (A->m_isSpecialWorkspace)
+            return A->m_name < B->m_name;
+        return A->m_id < B->m_id;
+    });
 
     if (images.empty()) {
         viewportCurrentWorkspace = 0;
@@ -2511,10 +2551,10 @@ void CScrollOverview::selectHoveredWorkspace() {
     closeOnWindow.reset();
     viewportCurrentWorkspace = workspaceIdx;
 
-    if (pMonitor && pMonitor->m_activeWorkspace != WORKSPACE) {
+    if (const auto CURRENT = overviewCurrentWorkspace(pMonitor.lock()); pMonitor && CURRENT != WORKSPACE) {
         if (focusSyncedFromWorkspaceID == WORKSPACE_INVALID)
-            focusSyncedFromWorkspaceID = pMonitor->m_activeWorkspace ? pMonitor->m_activeWorkspace->m_id : WORKSPACE_INVALID;
-        pMonitor->changeWorkspace(WORKSPACE, false, true, true);
+            focusSyncedFromWorkspaceID = CURRENT ? CURRENT->m_id : WORKSPACE_INVALID;
+        showOverviewWorkspace(pMonitor.lock(), WORKSPACE);
     }
 
     damage();
@@ -3492,8 +3532,7 @@ void CScrollOverview::moveViewportWorkspace(bool up) {
     if (!closeOnWindow)
         closeOnWindow = windowClosestToWorkspaceCenter(viewportCurrentWorkspace);
 
-    if (pMonitor && pMonitor->m_activeWorkspace != TARGETWORKSPACEIMAGE->pWorkspace)
-        pMonitor->changeWorkspace(TARGETWORKSPACEIMAGE->pWorkspace, false, true, true);
+    showOverviewWorkspace(pMonitor.lock(), TARGETWORKSPACEIMAGE->pWorkspace);
 
     damage();
 }
@@ -3697,10 +3736,10 @@ void CScrollOverview::syncFocusedSelection() {
     if (activeScrollOverview().get() != this)
         return;
 
-    if (Desktop::focusState()->window() == window && window->m_workspace == pMonitor->m_activeWorkspace)
+    if (Desktop::focusState()->window() == window && window->m_workspace == overviewCurrentWorkspace(pMonitor.lock()))
         return;
 
-    const auto PREVIOUSWORKSPACE = pMonitor ? pMonitor->m_activeWorkspace : PHLWORKSPACE{};
+    const auto PREVIOUSWORKSPACE = overviewCurrentWorkspace(pMonitor.lock());
 
     Desktop::focusState()->fullWindowFocus(window, Desktop::FOCUS_REASON_KEYBIND);
 
@@ -4221,12 +4260,20 @@ void CScrollOverview::renderWorkspaceBackground(PHLMONITOR monitor, size_t works
     const auto workspace         = workspaceImage->pWorkspace;
     const bool WASVISIBLE        = workspace->m_visible;
     const bool WASFORCERENDERING = workspace->m_forceRendering;
+    // A closed special workspace keeps the alpha it faded out to, and
+    // Hyprland multiplies its windows' opacity by it.
+    const bool  OVERRIDEALPHA    = workspace->m_isSpecialWorkspace && workspace->m_alpha;
+    const float PREVIOUSALPHA    = OVERRIDEALPHA ? workspace->m_alpha->value() : 1.F;
     workspace->m_visible         = true;
     workspace->m_forceRendering  = true;
+    if (OVERRIDEALPHA)
+        workspace->m_alpha->value() = 1.F;
 
-    auto restoreWorkspaceState = Hyprutils::Utils::CScopeGuard([workspace, WASVISIBLE, WASFORCERENDERING] {
+    auto restoreWorkspaceState = Hyprutils::Utils::CScopeGuard([workspace, WASVISIBLE, WASFORCERENDERING, OVERRIDEALPHA, PREVIOUSALPHA] {
         workspace->m_visible        = WASVISIBLE;
         workspace->m_forceRendering = WASFORCERENDERING;
+        if (OVERRIDEALPHA)
+            workspace->m_alpha->value() = PREVIOUSALPHA;
     });
 
     renderOverviewWorkspaceShadow(monitor, WORKSPACEBOX, renderScale, wallpaperMode == 0, WORKSPACEALPHA);
@@ -4256,12 +4303,20 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
     const auto workspace         = workspaceImage->pWorkspace;
     const bool WASVISIBLE        = workspace->m_visible;
     const bool WASFORCERENDERING = workspace->m_forceRendering;
+    // A closed special workspace keeps the alpha it faded out to, and
+    // Hyprland multiplies its windows' opacity by it.
+    const bool  OVERRIDEALPHA    = workspace->m_isSpecialWorkspace && workspace->m_alpha;
+    const float PREVIOUSALPHA    = OVERRIDEALPHA ? workspace->m_alpha->value() : 1.F;
     workspace->m_visible         = true;
     workspace->m_forceRendering  = true;
+    if (OVERRIDEALPHA)
+        workspace->m_alpha->value() = 1.F;
 
-    auto restoreWorkspaceState = Hyprutils::Utils::CScopeGuard([workspace, WASVISIBLE, WASFORCERENDERING] {
+    auto restoreWorkspaceState = Hyprutils::Utils::CScopeGuard([workspace, WASVISIBLE, WASFORCERENDERING, OVERRIDEALPHA, PREVIOUSALPHA] {
         workspace->m_visible        = WASVISIBLE;
         workspace->m_forceRendering = WASFORCERENDERING;
+        if (OVERRIDEALPHA)
+            workspace->m_alpha->value() = PREVIOUSALPHA;
     });
 
     const auto renderOverviewWindow = [&](const PHLWINDOW& window) {
@@ -5066,7 +5121,7 @@ void CScrollOverview::close(ECloseMode mode) {
         return;
     }
     const auto SELECTEDWORKSPACE    = PRESERVEMONITORSTATE ?
-        (MONITOR ? MONITOR->m_activeWorkspace : PHLWORKSPACE{}) :
+        overviewCurrentWorkspace(MONITOR) :
         (viewportCurrentWorkspace < images.size() && images[viewportCurrentWorkspace] ? images[viewportCurrentWorkspace]->pWorkspace : PHLWORKSPACE{});
 
     if (PRESERVEMONITORSTATE) {
@@ -5096,7 +5151,7 @@ void CScrollOverview::close(ECloseMode mode) {
         });
     };
 
-    if (!PRESERVEMONITORSTATE && !closeOnWindow && (!SELECTEDWORKSPACE || SELECTEDWORKSPACE == pMonitor->m_activeWorkspace)) {
+    if (!PRESERVEMONITORSTATE && !closeOnWindow && (!SELECTEDWORKSPACE || SELECTEDWORKSPACE == overviewCurrentWorkspace(MONITOR))) {
         const auto FOCUSEDWINDOW = getOverviewWindowToShow(Desktop::focusState()->window());
         if (!SELECTEDWORKSPACE || (FOCUSEDWINDOW && FOCUSEDWINDOW->m_workspace == SELECTEDWORKSPACE))
             closeOnWindow = FOCUSEDWINDOW;
@@ -5120,8 +5175,7 @@ void CScrollOverview::close(ECloseMode mode) {
         }
 
         if (sourceIdx < images.size() && targetIdx < images.size()) {
-            if (FINALWORKSPACE != pMonitor->m_activeWorkspace)
-                pMonitor->changeWorkspace(FINALWORKSPACE, false, true, true);
+            showOverviewWorkspace(MONITOR, FINALWORKSPACE);
 
             if (ACTIVATESELECTION)
                 Desktop::focusState()->fullWindowFocus(closeOnWindow.lock(), Desktop::FOCUS_REASON_DESKTOP_STATE_CHANGE);
@@ -5154,9 +5208,8 @@ void CScrollOverview::close(ECloseMode mode) {
             break;
         }
 
-        if (SELECTEDWORKSPACE && SELECTEDWORKSPACE != pMonitor->m_activeWorkspace)
-            pMonitor->changeWorkspace(SELECTEDWORKSPACE, false, true, true);
-    } else if (closeOnWindow == Desktop::focusState()->window() && closeOnWindow->m_workspace == pMonitor->m_activeWorkspace) {
+        showOverviewWorkspace(MONITOR, SELECTEDWORKSPACE);
+    } else if (closeOnWindow == Desktop::focusState()->window() && closeOnWindow->m_workspace == overviewCurrentWorkspace(MONITOR)) {
         if (focusSyncedFromWorkspaceID != WORKSPACE_INVALID) {
             const auto ACTIVEIDX   = activeWorkspaceIndex();
             const auto FINALPITCH = getWorkspaceLogicalPitch(pMonitor.lock(), 1.F, layout);
@@ -5173,8 +5226,7 @@ void CScrollOverview::close(ECloseMode mode) {
         *viewOffset = Vector2D{};
     } else {
 
-        if (closeOnWindow->m_workspace != pMonitor->m_activeWorkspace)
-            pMonitor->changeWorkspace(closeOnWindow->m_workspace, false, true, true);
+        showOverviewWorkspace(MONITOR, closeOnWindow->m_workspace);
 
         if (ACTIVATESELECTION)
             Desktop::focusState()->fullWindowFocus(closeOnWindow.lock(), Desktop::FOCUS_REASON_DESKTOP_STATE_CHANGE);
@@ -5251,7 +5303,7 @@ void CScrollOverview::onPreRender() {
     if (closing)
         return;
 
-    if (pMonitor && pMonitor->m_activeWorkspace && pMonitor->m_activeWorkspace != startedOn) {
+    if (const auto CURRENT = overviewCurrentWorkspace(pMonitor.lock()); CURRENT && CURRENT != startedOn) {
         rebuildPending = false;
         markBlurDirty();
         onWorkspaceChange();
@@ -5297,7 +5349,7 @@ void CScrollOverview::onWorkspaceChange() {
         previousWorkspaceOffsets.emplace(image->pWorkspace->m_id, workspaceOverviewLogicalOffset(i, previousActiveIdx, PREVIOUSLOGICALPITCH));
     }
 
-    const auto NEWWORKSPACE      = pMonitor->m_activeWorkspace;
+    const auto NEWWORKSPACE      = overviewCurrentWorkspace(pMonitor.lock());
     const bool INSERTEDWORKSPACE = std::find(previousWorkspaceIDs.begin(), previousWorkspaceIDs.end(), NEWWORKSPACE->m_id) == previousWorkspaceIDs.end();
     const auto REQUESTEDREMOVEDWORKSPACE = pendingRemovedWorkspace.lock();
     const bool SHOULDREMOVEPREVIOUSWORKSPACE =

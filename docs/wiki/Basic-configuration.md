@@ -39,6 +39,7 @@ end)
 | cross_monitor_drag | bool | enable cross-monitor overview dragging and Hyprland move-drag adoption; does not affect `open all`, `toggle all`, or manually opened overviews | `false` |
 | wallpaper | int | wallpaper mode: `0` global only, `1` per-workspace only, `2` both | `0` |
 | blur | bool | blur the main overview wallpaper without blurring workspace wallpapers | `false` |
+| special_workspaces | bool | show special workspaces (scratchpads) after the regular ones, sorted by name. Each appears on the monitor it was last opened on. Selecting one opens it over the current workspace; selecting a regular workspace closes an open special | `false` |
 | input | structure | input configuration subcategory; accepts a structure containing the properties listed below | see below |
 | shadow | structure | shadow configuration subcategory; accepts a structure containing the properties listed below | see below |
 
