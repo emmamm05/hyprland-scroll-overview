@@ -122,6 +122,23 @@ static void showOverviewWorkspace(const PHLMONITOR& monitor, const PHLWORKSPACE&
     monitor->changeWorkspace(workspace, false, true, true);
 }
 
+// Whether a window dragged out of `from` may be dropped on `to`. Moving within
+// one workspace is always allowed; crossing into, out of or between special
+// workspaces needs special_workspace_drag. Pinned windows can't live on a
+// special workspace at all.
+static bool overviewDropAllowed(const PHLWINDOW& window, const PHLWORKSPACE& from, const PHLWORKSPACE& to, const PHLMONITOR& monitor) {
+    if (!from || !to || from == to)
+        return true;
+
+    if (!from->m_isSpecialWorkspace && !to->m_isSpecialWorkspace)
+        return true;
+
+    if (window && window->m_pinned && to->m_isSpecialWorkspace)
+        return false;
+
+    return ScrollOverview::Config::getSpecialWorkspaceDrag(monitor);
+}
+
 static void releaseTopLayerPointerButtons(uint32_t timeMs) {
     if (g_topLayerPointerButtons.empty())
         return;
@@ -2459,6 +2476,9 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewDropPoint(const Vector2D& point
         if (!wimg || !wimg->pWorkspace)
             continue;
 
+        if (draggedWindow && !overviewDropAllowed(draggedWindow, draggedWindow->m_workspace, wimg->pWorkspace, MONITOR))
+            continue;
+
         const auto WORKSPACEOFFSET = workspaceOverviewOffset(workspaceIdx, ACTIVEIDX, WORKSPACEPITCH);
         for (const bool floating : {true, false}) {
             for (auto it = wimg->windows.rbegin(); it != wimg->windows.rend(); ++it) {
@@ -2481,6 +2501,9 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewDropPoint(const Vector2D& point
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         const auto& wimg = images[workspaceIdx];
         if (!wimg || !wimg->pWorkspace)
+            continue;
+
+        if (draggedWindow && !overviewDropAllowed(draggedWindow, draggedWindow->m_workspace, wimg->pWorkspace, MONITOR))
             continue;
 
         const auto WORKSPACEBOX = getOverviewWorkspaceUsableBox(wimg->pWorkspace, MONITOR, scale->value(), viewOffset->value(),
@@ -3455,13 +3478,13 @@ void CScrollOverview::endWindowDrag() {
         }
     }
 
-    if (DROPWORKSPACE && DROPMONITOR && DROPWORKSPACE == DROPMONITOR->m_activeWorkspace) {
+    if (DROPWORKSPACE && DROPMONITOR && DROPWORKSPACE == overviewCurrentWorkspace(DROPMONITOR)) {
         const auto FULLSCREENWINDOW = getOverviewWindowToShow(Fullscreen::controller()->getFullscreenWindow(DROPWORKSPACE));
         if (shouldShowOverviewWindow(FULLSCREENWINDOW) && FULLSCREENWINDOW->m_workspace == DROPWORKSPACE)
             dropOverview->emitFullscreenVisibilityState(FULLSCREENWINDOW, true);
     }
 
-    if (WINDOW && DROPMONITOR && DROPWORKSPACE == DROPMONITOR->m_activeWorkspace) {
+    if (WINDOW && DROPMONITOR && DROPWORKSPACE == overviewCurrentWorkspace(DROPMONITOR)) {
         dropOverview->selectOverviewWindow(WINDOW, dropWorkspaceIdx, true);
         g_pseudoFocusedWindow = WINDOW;
         g_pseudoFocusUntil    = Time::steadyNow() + POST_DROP_PSEUDO_FOCUS_DURATION;

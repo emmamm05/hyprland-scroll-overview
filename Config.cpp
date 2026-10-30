@@ -421,6 +421,7 @@ static void defineConfigValues() {
     addValue(makeShared<CIntValue>("plugin:scrolloverview:wallpaper", "wallpaper mode", 0, SIntValueOptions{.min = 0, .max = 2}));
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:blur", "blur the overview wallpaper", false));
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:special_workspaces", "show special workspaces after the regular ones", false));
+    addValue(makeShared<CBoolValue>("plugin:scrolloverview:special_workspace_drag", "allow dragging windows into, out of and between special workspaces", false));
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:shadow:enabled", "draw a shadow around each workspace card", false));
     addValue(makeShared<CIntValue>("plugin:scrolloverview:shadow:range", "workspace card shadow range", -1));
     addValue(makeShared<CIntValue>("plugin:scrolloverview:shadow:render_power", "workspace card shadow render power", -1));
@@ -523,6 +524,10 @@ bool getBlur(PHLMONITOR monitor) {
 
 bool getSpecialWorkspaces(PHLMONITOR monitor) {
     return getValue<bool>("plugin:scrolloverview:special_workspaces", monitor);
+}
+
+bool getSpecialWorkspaceDrag(PHLMONITOR monitor) {
+    return getValue<bool>("plugin:scrolloverview:special_workspace_drag", monitor);
 }
 
 ::Config::CCssGapData getCssGapData(const std::string& name) {

@@ -112,6 +112,7 @@ EScrollAction getHorizontalScrollAction(ELayout layout, PHLMONITOR monitor);
 int           getWallpaperMode(PHLMONITOR monitor);
 bool          getBlur(PHLMONITOR monitor);
 bool          getSpecialWorkspaces(PHLMONITOR monitor);
+bool          getSpecialWorkspaceDrag(PHLMONITOR monitor);
 ::Config::CCssGapData getCssGapData(const std::string& name);
 int          getShadowEnabled(PHLMONITOR monitor);
 int          getShadowRange(PHLMONITOR monitor);
