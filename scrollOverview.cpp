@@ -37,6 +37,7 @@
 #include <hyprland/src/desktop/view/Group.hpp>
 #include <hyprland/src/desktop/view/Window.hpp>
 #include <hyprland/src/desktop/view/WLSurface.hpp>
+#include <hyprland/src/protocols/PointerConstraints.hpp>
 #include <hyprland/src/desktop/view/LayerSurface.hpp>
 #include <hyprland/src/desktop/view/Popup.hpp>
 #include <hyprland/src/desktop/state/WindowState.hpp>
@@ -1068,6 +1069,14 @@ CScrollOverview::~CScrollOverview() {
     if (scrollOverviews().empty()) {
         restoreActiveWorkspaceVisibility();
         Pointer::Cursor::overrideController->unsetOverride(Pointer::Cursor::CURSOR_OVERRIDE_SPECIAL_ACTION);
+
+        // Opening the overview released every pointer lock. Hyprland only
+        // re-activates one when keyboard focus *changes* to its surface, so
+        // closing back onto the window that was already focused (a game,
+        // typically) would leave it unlocked. Re-activate it here; activate()
+        // is a no-op for a lock that is already active or dead.
+        if (const auto SURF = Desktop::View::CWLSurface::fromResource(Desktop::focusState()->surface()); SURF && SURF->constraint())
+            SURF->constraint()->activate();
     }
     if (const auto MONITOR = pMonitor.lock())
         MONITOR->m_blurFBDirty = true;

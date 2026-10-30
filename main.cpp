@@ -39,6 +39,7 @@ static CFunctionHook* g_pScrollSendFrameEventsHook = nullptr;
 static CFunctionHook* g_pScrollSurfaceFrameHook    = nullptr;
 static CFunctionHook* g_pScrollMoveMouseHook       = nullptr;
 static CFunctionHook* g_pScrollChangeWorkspaceHook = nullptr;
+static CFunctionHook* g_pScrollRelativeMotionHook = nullptr;
 typedef void (*origRenderWorkspace)(void*, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&, const CBox&);
 typedef void (*origAddDamageA)(void*, const CBox&);
 typedef void (*origAddDamageB)(void*, const pixman_region32_t*);
@@ -47,6 +48,7 @@ typedef void (*origScheduleFrame)(void*, Aquamarine::IOutput::scheduleFrameReaso
 typedef void (*origSendFrameEventsToWorkspace)(void*, PHLMONITOR, PHLWORKSPACE, const Time::steady_tp&);
 typedef void (*origSurfaceFrame)(void*, const Time::steady_tp&);
 typedef void (*origMoveMouse)(void*, const Vector2D&);
+typedef void (*origSendRelativeMotion)(void*, uint64_t, const Vector2D&, const Vector2D&);
 using origChangeWorkspace = Config::Actions::ActionResult (*)(PHLWORKSPACE);
 
 static bool g_unloading = false;
@@ -86,6 +88,7 @@ bool ensureScrollOverviewHooks() {
         return true;
 
     bool success = g_pScrollRenderWorkspaceHook->hook();
+    success      = success && g_pScrollRelativeMotionHook->hook();
     success      = success && g_pScrollScheduleFrameHook->hook();
     success      = success && g_pScrollDamageSurfaceHook->hook();
     success      = success && g_pScrollSendFrameEventsHook->hook();
@@ -120,6 +123,8 @@ void disableScrollOverviewHooks() {
         g_pScrollScheduleFrameHook->unhook();
     if (g_pScrollRenderWorkspaceHook)
         g_pScrollRenderWorkspaceHook->unhook();
+    if (g_pScrollRelativeMotionHook)
+        g_pScrollRelativeMotionHook->unhook();
 
     g_scrollOverviewHooksActive = false;
 }
@@ -199,6 +204,17 @@ static void hkSurfaceFrame(void* thisptr, const Time::steady_tp& now) {
         return;
 
     rc<origSurfaceFrame>(g_pScrollSurfaceFrameHook->m_original)(thisptr, now);
+}
+
+// While an overview is open the mouse drives the overview, not the window under
+// it. Hyprland sends relative motion to the pointer-focused client before the
+// mouse.move event the overview cancels, so without this a pointer-locked game
+// (whose lock the overview releases) keeps turning its camera behind it.
+static void hkSendRelativeMotion(void* thisptr, uint64_t time, const Vector2D& delta, const Vector2D& deltaUnaccel) {
+    if (!scrollOverviews().empty())
+        return;
+
+    rc<origSendRelativeMotion>(g_pScrollRelativeMotionHook->m_original)(thisptr, time, delta, deltaUnaccel);
 }
 
 static void hkAddDamageA(void* thisptr, const CBox& box) {
@@ -653,6 +669,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         SCROLLOVERVIEW_HANDLE,
         findFnOrThrow("sendFrameEventsToWorkspace", {"CHyprRenderer::sendFrameEventsToWorkspace(", "IHyprRenderer::sendFrameEventsToWorkspace("}),
         rc<void*>(hkSendFrameEventsToWorkspace));
+
+    g_pScrollRelativeMotionHook = HyprlandAPI::createFunctionHook(
+        SCROLLOVERVIEW_HANDLE,
+        findFnOrThrow("sendRelativeMotion", {"CRelativePointerProtocol::sendRelativeMotion(unsigned long"}),
+        rc<void*>(hkSendRelativeMotion));
 
     g_pScrollSurfaceFrameHook = HyprlandAPI::createFunctionHook(
         SCROLLOVERVIEW_HANDLE,
