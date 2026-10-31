@@ -4242,6 +4242,16 @@ void CScrollOverview::restoreForcedLayerVisibility() {
         }
 
         const bool fullscreen = Fullscreen::controller()->hasFullscreen(MONITOR);
+
+        // The value saved when the overview opened can be stale: switching
+        // workspace through the overview (onto a fullscreen game, say) is where
+        // Hyprland would have reset every layer to not-above-fullscreen, but
+        // the overview kept forcing them above. Restoring "above" would leave
+        // a Top-layer bar drawn over the fullscreen window, so below the
+        // Overlay layer follow Hyprland: a fullscreen window covers the layer.
+        if (fullscreen && entry.layer->m_layer < ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY)
+            entry.layer->m_aboveFullscreen = false;
+
         const bool visible    = !fullscreen || entry.layer->m_layer >= ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY || entry.layer->m_aboveFullscreen;
         entryLsAlpha->setValueAndWarp(visible ? 1.F : 0.F);
     }
