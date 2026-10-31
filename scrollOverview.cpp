@@ -77,6 +77,10 @@ static CScrollOverview*             g_pointerGrabOverview = nullptr;
 static bool                         g_finishingAdoptedNativeDrag    = false;
 static std::unordered_set<uint32_t> g_topLayerPointerButtons;
 static PHLWINDOWREF                 g_pseudoFocusedWindow;
+// "Show empty workspaces" checkbox state (empty_workspace_toggle). Shared by
+// every monitor's overview and kept for the session, so the overview reopens
+// the way it was left; Hyprland restart resets it to unchecked.
+static bool                         g_showEmptyWorkspaces = false;
 static Time::steady_tp              g_pseudoFocusUntil = {};
 
 static void restoreActiveWorkspaceVisibility() {
@@ -1334,6 +1338,11 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
             return;
         }
 
+        if (!g_pointerGrabOverview && !dragActiveWindow && handleEmptyWorkspaceToggleButton(event)) {
+            info.cancelled = true;
+            return;
+        }
+
         if (event.state == WL_POINTER_BUTTON_STATE_PRESSED)
             g_pointerGrabOverview = this;
 
@@ -2076,6 +2085,7 @@ void CScrollOverview::rebuildWorkspaceImages() {
     const auto REMOVEDWORKSPACE  = pendingRemovedWorkspace.lock();
 
     const bool SHOWSPECIAL       = ScrollOverview::Config::getSpecialWorkspaces(pMonitor.lock());
+    const bool HIDEEMPTY         = ScrollOverview::Config::getEmptyWorkspaceToggle(pMonitor.lock()) && !g_showEmptyWorkspaces;
 
     images.clear();
 
@@ -2085,6 +2095,11 @@ void CScrollOverview::rebuildWorkspaceImages() {
             continue;
 
         if (WORKSPACE == REMOVEDWORKSPACE)
+            continue;
+
+        // Unchecked "Show empty workspaces": leave out workspaces without
+        // windows, but never the one the overview is centred on or showing.
+        if (HIDEEMPTY && WORKSPACE->getWindowCount() == 0 && WORKSPACE != startedOn && WORKSPACE != viewportWorkspace && WORKSPACE != selectedWorkspace)
             continue;
 
         images.emplace_back(makeShared<SWorkspaceImage>(WORKSPACE));
@@ -4594,6 +4609,116 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
     }
 }
 
+// "Show empty workspaces" checkbox in the bottom-left corner, styled like the
+// workspace label badges. Fades in with the opening zoom and is gone while
+// closing; emptyToggleBox records where it is for the click handler.
+void CScrollOverview::renderEmptyWorkspaceToggle(PHLMONITOR monitor) {
+    emptyToggleBox = {};
+    if (!monitor || closing || !ScrollOverview::Config::getEmptyWorkspaceToggle(monitor))
+        return;
+
+    const float TARGETSCALE = ScrollOverview::Config::getScale(monitor);
+    const float ALPHA       = TARGETSCALE < 0.999F ? std::clamp((1.F - scale->value()) / (1.F - TARGETSCALE), 0.F, 1.F) : 1.F;
+    if (ALPHA <= 0.001F)
+        return;
+
+    const int   FONTPX     = std::max(1, sc<int>(std::round(ScrollOverview::Config::getLabelFontSize(monitor) * monitor->m_scale)));
+    const float PAD        = std::round(FONTPX * 0.5F);
+    const auto  FONTFAMILY = ScrollOverview::Config::getValue<std::string>("misc:font_family");
+
+    const auto textureFor = [&](const std::string& text) -> SP<Render::ITexture> {
+        auto& tex = labelTextures[text + "\n" + std::to_string(FONTPX)];
+        if (!tex)
+            tex = g_pHyprRenderer->renderText(text, CHyprColor{1.F, 1.F, 1.F, 1.F}, FONTPX, false, FONTFAMILY, 0, 600);
+        return tex && tex->ok() ? tex : SP<Render::ITexture>{};
+    };
+
+    const auto TEXT = textureFor("Show empty workspaces");
+    if (!TEXT)
+        return;
+
+    const float BOXSIZE = std::round(TEXT->m_size.y * 0.8F);
+    const float HEIGHT  = TEXT->m_size.y + PAD;
+    CBox        pillBox = {PAD * 2.F, monitor->m_pixelSize.y - PAD * 2.F - HEIGHT, PAD + BOXSIZE + PAD + TEXT->m_size.x + PAD, HEIGHT};
+    pillBox.round();
+    emptyToggleBox = pillBox;
+
+    const bool HOVERED = pillBox.containsPoint(lastMousePosLocal);
+
+    CRectPassElement::SRectData pill;
+    pill.box   = pillBox;
+    pill.color = CHyprColor{0.F, 0.F, 0.F, (HOVERED ? 0.75F : 0.55F) * ALPHA};
+    pill.round = sc<int>(std::round(pillBox.height * 0.3F));
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(pill));
+
+    // The box: a light outline (an outer square with a darker one inside),
+    // filled with the accent colour and a check mark when checked.
+    CBox box = {pillBox.x + PAD, pillBox.y + (pillBox.height - BOXSIZE) / 2.F, BOXSIZE, BOXSIZE};
+    box.round();
+    const float BORDER = std::max(1.F, std::round(BOXSIZE * 0.1F));
+
+    CRectPassElement::SRectData outer;
+    outer.box   = box;
+    outer.color = CHyprColor{1.F, 1.F, 1.F, 0.9F * ALPHA};
+    outer.round = sc<int>(std::round(BOXSIZE * 0.2F));
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(outer));
+
+    CRectPassElement::SRectData inner;
+    inner.box   = CBox{box.x + BORDER, box.y + BORDER, box.width - BORDER * 2.F, box.height - BORDER * 2.F}.round();
+    inner.color = g_showEmptyWorkspaces ? CHyprColor{0.42F, 0.18F, 0.66F, ALPHA} : CHyprColor{0.08F, 0.08F, 0.08F, ALPHA};
+    inner.round = sc<int>(std::max(0.F, std::round(BOXSIZE * 0.2F) - BORDER));
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CRectPassElement>(inner));
+
+    if (g_showEmptyWorkspaces) {
+        if (const auto CHECK = textureFor("\u2713")) {
+            CTexPassElement::SRenderData check;
+            check.tex = CHECK;
+            check.box = CBox{box.x + (box.width - CHECK->m_size.x) / 2.F, box.y + (box.height - CHECK->m_size.y) / 2.F, CHECK->m_size.x, CHECK->m_size.y}.round();
+            check.a   = ALPHA;
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(check));
+        }
+    }
+
+    CTexPassElement::SRenderData text;
+    text.tex = TEXT;
+    text.box = CBox{box.x + box.width + PAD, pillBox.y + PAD / 2.F, TEXT->m_size.x, TEXT->m_size.y}.round();
+    text.a   = ALPHA;
+    g_pHyprRenderer->m_renderPass.add(makeUnique<CTexPassElement>(text));
+}
+
+// A main-button click on the checkbox toggles it and rebuilds every open
+// overview. Both the press and its release are consumed, so the click never
+// reaches the card or window underneath. Returns whether the event was used.
+bool CScrollOverview::handleEmptyWorkspaceToggleButton(const IPointer::SButtonEvent& event) {
+    const uint32_t MAINBUTTON = ScrollOverview::Config::getLeftHanded(pMonitor.lock()) ? BTN_RIGHT : BTN_LEFT;
+    if (event.button != MAINBUTTON || !ScrollOverview::Config::getEmptyWorkspaceToggle(pMonitor.lock()))
+        return false;
+
+    lastMousePosLocal = getOverviewMousePosLocal(pMonitor.lock());
+    const bool INSIDE = !emptyToggleBox.empty() && emptyToggleBox.containsPoint(lastMousePosLocal);
+
+    if (event.state == WL_POINTER_BUTTON_STATE_PRESSED) {
+        emptyTogglePressed = INSIDE;
+        return INSIDE;
+    }
+
+    if (!emptyTogglePressed)
+        return false;
+
+    emptyTogglePressed = false;
+    if (INSIDE) {
+        g_showEmptyWorkspaces = !g_showEmptyWorkspaces;
+        for (const auto& overview : scrollOverviews()) {
+            if (auto* const SCROLL = dynamic_cast<CScrollOverview*>(overview.get())) {
+                SCROLL->rebuildPending = true;
+                SCROLL->damage();
+            }
+        }
+    }
+
+    return true;
+}
+
 void CScrollOverview::renderDraggedWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale, const Time::steady_tp& now) {
     auto*      dragOwner = g_pointerGrabOverview && g_pointerGrabOverview->dragActiveWindow ? g_pointerGrabOverview : this;
     const auto WINDOW    = getOverviewWindowToShow(dragOwner->dragActiveWindow.lock());
@@ -5693,6 +5818,7 @@ void CScrollOverview::render() {
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         renderWorkspaceLabel(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE);
     }
+    renderEmptyWorkspaceToggle(MONITOR);
 
     renderDraggedWindow(MONITOR, ACTIVEIDX, PITCH, SCALE, NOW);
     renderPinnedFloatingWindows(MONITOR, SCALE, NOW);

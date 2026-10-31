@@ -11,6 +11,7 @@
 #include <hyprland/src/layout/LayoutManager.hpp>
 #include <hyprland/src/render/Framebuffer.hpp>
 #include <hyprland/src/render/types.hpp>
+#include <hyprland/src/devices/IPointer.hpp>
 #include <chrono>
 #include <string>
 #include <unordered_map>
@@ -88,6 +89,8 @@ class CScrollOverview : public IOverview {
     void   renderWorkspaceBackground(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale, int wallpaperMode, const Time::steady_tp& now);
     void   renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale, int wallpaperMode, const Time::steady_tp& now);
     void   renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale);
+    void   renderEmptyWorkspaceToggle(PHLMONITOR monitor);
+    bool   handleEmptyWorkspaceToggleButton(const IPointer::SButtonEvent& event);
     bool   hasVisiblePrecomputedBlurWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale) const;
     void   renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, float renderScale, const Time::steady_tp& now, const CBox* workspaceBox = nullptr,
                              bool dragged = false);
@@ -269,6 +272,10 @@ class CScrollOverview : public IOverview {
         PHLANIMVAR<float> wallpaperAlpha;
     };
     std::unordered_map<WORKSPACEID, SWorkspaceCardSize> workspaceCardSizes;
+    // Where the "Show empty workspaces" checkbox was last drawn (monitor
+    // pixels; empty until drawn) and whether a press started on it.
+    CBox                             emptyToggleBox;
+    bool                             emptyTogglePressed = false;
     // Rendered workspace labels, keyed by text and pixel size.
     std::unordered_map<std::string, SP<Render::ITexture>> labelTextures;
     SWorkspaceInsertTransition       workspaceInsertTransition;

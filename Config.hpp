@@ -114,6 +114,7 @@ bool          getBlur(PHLMONITOR monitor);
 bool          getSpecialWorkspaces(PHLMONITOR monitor);
 bool          getSpecialWorkspaceDrag(PHLMONITOR monitor);
 float         getEmptyWorkspaceSize(PHLMONITOR monitor);
+bool          getEmptyWorkspaceToggle(PHLMONITOR monitor);
 bool          getLabelEnabled(PHLMONITOR monitor);
 int           getLabelFontSize(PHLMONITOR monitor);
 ::Config::CCssGapData getCssGapData(const std::string& name);
