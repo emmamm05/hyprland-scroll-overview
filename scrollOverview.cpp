@@ -1731,6 +1731,13 @@ CScrollOverview::CScrollOverview(PHLWORKSPACE startedOn_, bool swipe_, PHLMONITO
                 break;
             case XKB_KEY_Return:
             case XKB_KEY_KP_Enter: closeAll(); break;
+            // Exit, like the "off" dispatcher. While a window is being dragged
+            // Escape cancels the drag instead (dragKeyboardKeyHook).
+            case XKB_KEY_Escape:
+                if (dragActiveWindow)
+                    return;
+                closeAll();
+                break;
             default: return;
         }
 
