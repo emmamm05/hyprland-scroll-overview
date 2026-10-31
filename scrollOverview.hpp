@@ -24,6 +24,21 @@
 class CMonitor;
 struct wl_event_source;
 
+// Where a workspace card sits along the stacking axis. In the default layout
+// it is just an offset in rendered px, relative to the active card and moved
+// by the view offset. In the carousel each card also has its own extra scale,
+// and its offset already includes the scroll position, so the view offset is
+// not applied again. Converts implicitly from a plain offset.
+struct SCardOffset {
+    float offset   = 0.F;
+    float scaleMul = 1.F;
+    bool  absolute = false;
+
+    SCardOffset() = default;
+    SCardOffset(float offset_) : offset(offset_) {}
+    SCardOffset(float offset_, float scaleMul_, bool absolute_) : offset(offset_), scaleMul(scaleMul_), absolute(absolute_) {}
+};
+
 class CScrollOverview : public IOverview {
   public:
     CScrollOverview(PHLWORKSPACE startedOn_, bool swipe = false, PHLMONITOR monitor = {});
@@ -111,7 +126,10 @@ class CScrollOverview : public IOverview {
     size_t dragWorkspaceIndex(PHLWINDOW window) const;
     void   updateWorkspaceOverflow();
     CBox   workspaceOverviewVisibleBox(size_t workspaceIdx, const CBox& workspaceBox, float renderScale, PHLMONITOR monitor) const;
-    float      workspaceOverviewOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const;
+    SCardOffset workspaceOverviewOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const;
+    float      carouselPosition(size_t workspaceIdx, size_t activeIdx, float logicalPitch) const;
+    std::vector<size_t> cardPaintOrder() const;
+    size_t     carouselCardAt(const Vector2D& point) const;
     float      workspaceOverviewLogicalOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const;
     float      workspaceOverviewAlpha(size_t workspaceIdx) const;
     PHLWINDOW windowAtOverviewPoint(const Vector2D& point, size_t* workspaceIdx = nullptr) const;

@@ -412,25 +412,26 @@ static bool layerHasOverviewAnimation(const PHLLS& layer) {
 
 static Vector2D axisOffsetVector(float offset, ScrollOverview::Config::ELayout layout);
 
-static CBox getOverviewBox(CBox box, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout,
+static CBox getOverviewBox(CBox box, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, const SCardOffset& offset, ScrollOverview::Config::ELayout layout,
                            bool round = true) {
     const auto MONITORSCALE    = monitor->m_scale;
     const auto VIEWPORT_CENTER = CBox{{}, monitor->m_size * MONITORSCALE}.middle();
+    const auto VIEWTRANSLATION = offset.absolute ? Vector2D{} : -viewOffset * scale * MONITORSCALE;
 
     box = {box.pos() * MONITORSCALE, box.size() * MONITORSCALE};
-    box.translate(-VIEWPORT_CENTER).scale(scale).translate(VIEWPORT_CENTER).translate(-viewOffset * scale * MONITORSCALE).translate(axisOffsetVector(offset, layout));
+    box.translate(-VIEWPORT_CENTER).scale(scale * offset.scaleMul).translate(VIEWPORT_CENTER).translate(VIEWTRANSLATION).translate(axisOffsetVector(offset.offset, layout));
     if (round)
         box.round();
 
     return box;
 }
 
-static CBox getOverviewGlobalBox(CBox globalBox, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout,
+static CBox getOverviewGlobalBox(CBox globalBox, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, const SCardOffset& offset, ScrollOverview::Config::ELayout layout,
                                  bool round = true) {
     return getOverviewBox({globalBox.pos() - monitor->m_position, globalBox.size()}, monitor, scale, viewOffset, offset, layout, round);
 }
 
-static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout,
+static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, const SCardOffset& offset, ScrollOverview::Config::ELayout layout,
                                  bool round = true) {
     if (!window)
         return {};
@@ -438,7 +439,7 @@ static CBox getOverviewWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, fl
     return getOverviewGlobalBox(window->geometricBox(Desktop::View::IGeometric::GEOMETRIC_CURRENT), monitor, scale, viewOffset, offset, layout, round);
 }
 
-static CBox getOverviewDragWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout,
+static CBox getOverviewDragWindowBox(const PHLWINDOW& window, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, const SCardOffset& offset, ScrollOverview::Config::ELayout layout,
                                      bool round = true) {
     if (!window)
         return {};
@@ -494,7 +495,7 @@ static float axisSize(const Vector2D& size, ScrollOverview::Config::ELayout layo
     return layout == ScrollOverview::Config::ELayout::HORIZONTAL ? size.x : size.y;
 }
 
-static CBox getOverviewWorkspaceBox(PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset, ScrollOverview::Config::ELayout layout) {
+static CBox getOverviewWorkspaceBox(PHLMONITOR monitor, float scale, const Vector2D& viewOffset, const SCardOffset& offset, ScrollOverview::Config::ELayout layout) {
     return getOverviewBox({{}, monitor->m_size}, monitor, scale, viewOffset, offset, layout);
 }
 
@@ -901,7 +902,7 @@ static Vector2D overviewScrollingCameraTranslation(Layout::Tiled::CScrollingAlgo
     return CONTROLLER->isPrimaryHorizontal() ? Vector2D{TRANSLATION, 0.F} : Vector2D{0.F, TRANSLATION};
 }
 
-static CBox getOverviewWorkspaceUsableBox(const PHLWORKSPACE& workspace, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, float offset,
+static CBox getOverviewWorkspaceUsableBox(const PHLWORKSPACE& workspace, PHLMONITOR monitor, float scale, const Vector2D& viewOffset, const SCardOffset& offset,
                                           ScrollOverview::Config::ELayout layout) {
     if (!workspace || !monitor)
         return {};
@@ -1940,7 +1941,7 @@ bool CScrollOverview::isSelectedWorkspace(const PHLWORKSPACE& workspace) const {
         images[viewportCurrentWorkspace]->pWorkspace == workspace;
 }
 
-float CScrollOverview::workspaceOverviewOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const {
+SCardOffset CScrollOverview::workspaceOverviewOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const {
     const auto MONITOR             = pMonitor.lock();
     const auto MONITORSCALE        = MONITOR ? std::max(MONITOR->m_scale, 0.01F) : 1.F;
     const auto MONITORSIZE         = MONITOR ? axisSize(MONITOR->m_size, layout) : 0.F;
@@ -1949,6 +1950,22 @@ float CScrollOverview::workspaceOverviewOffset(size_t workspaceIdx, size_t activ
         std::max(scale->value(), 0.01F);
     const auto LOGICALPITCH        = MONITOR ? getWorkspaceLogicalPitch(MONITOR, RENDERSCALE, layout) : workspacePitch / std::max(RENDERSCALE * MONITORSCALE, 0.01F);
     const auto RENDEREDLOGICALUNIT = RENDERSCALE * MONITORSCALE;
+
+    // Carousel: the card d steps from the middle of the carousel is scaled by
+    // scale_step^|d| and pushed out just far enough that its outer edge peeks
+    // `peek` cards past the one in front of it. Past `depth` steps a card sits
+    // where the last visible one is, smaller, so it is hidden behind it.
+    if (MONITOR && ScrollOverview::Config::getCarousel(MONITOR)) {
+        const float D        = carouselPosition(workspaceIdx, activeIdx, LOGICALPITCH);
+        const float DEPTH    = sc<float>(ScrollOverview::Config::getCarouselDepth(MONITOR));
+        const float STEPS    = std::min(std::abs(D), DEPTH);
+        const float SCALEMUL = std::pow(ScrollOverview::Config::getCarouselScaleStep(MONITOR), std::min(std::abs(D), DEPTH + 1.F));
+        const float CARD     = MONITORSIZE * RENDEREDLOGICALUNIT;
+        const float DISTANCE = CARD / 2.F * (1.F - SCALEMUL) + ScrollOverview::Config::getCarouselPeek(MONITOR) * CARD * STEPS;
+
+        return SCardOffset{D < 0.F ? -DISTANCE : DISTANCE, SCALEMUL, true};
+    }
+
     const auto DEFAULTOFFSET       = workspaceOverviewLogicalOffset(workspaceIdx, activeIdx, LOGICALPITCH) * RENDEREDLOGICALUNIT;
 
     if (!workspaceInsertTransition.active || workspaceIdx >= images.size() || !images[workspaceIdx] || !images[workspaceIdx]->pWorkspace)
@@ -1970,9 +1987,61 @@ float CScrollOverview::workspaceOverviewOffset(size_t workspaceIdx, size_t activ
     return NEWOFFSET;
 }
 
+// Signed distance of a card from the middle of the carousel, in cards: its
+// index relative to the active card, minus how far the view has scrolled
+// (viewOffset, in logical px along the stacking axis, one pitch per card).
+// Continuous, so scrolling and gestures animate through the stack.
+float CScrollOverview::carouselPosition(size_t workspaceIdx, size_t activeIdx, float logicalPitch) const {
+    return (sc<float>(workspaceIdx) - sc<float>(activeIdx)) - axisValue(viewOffset->value(), layout) / std::max(logicalPitch, 1.F);
+}
+
+// Order to paint cards in: as listed, except in the carousel, where the cards
+// furthest from the middle go first so nearer ones cover them.
+std::vector<size_t> CScrollOverview::cardPaintOrder() const {
+    std::vector<size_t> order(images.size());
+    for (size_t i = 0; i < order.size(); ++i)
+        order[i] = i;
+
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR || !ScrollOverview::Config::getCarousel(MONITOR))
+        return order;
+
+    const auto ACTIVEIDX    = activeWorkspaceIndex();
+    const auto LOGICALPITCH = getWorkspaceLogicalPitch(MONITOR, scale->value(), layout);
+    std::ranges::stable_sort(order, [&](size_t a, size_t b) {
+        return std::abs(carouselPosition(a, ACTIVEIDX, LOGICALPITCH)) > std::abs(carouselPosition(b, ACTIVEIDX, LOGICALPITCH));
+    });
+    return order;
+}
+
+// The front-most carousel card under a point, or images.size() for none.
+// Cards overlap in the carousel, so hit tests must stop at the first card that
+// covers the point rather than reach cards hidden behind it.
+size_t CScrollOverview::carouselCardAt(const Vector2D& point) const {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR)
+        return images.size();
+
+    const auto ORDER     = cardPaintOrder();
+    const auto ACTIVEIDX = activeWorkspaceIndex();
+    const auto PITCH     = getWorkspaceRenderedPitch(MONITOR, scale->value(), layout);
+    for (auto it = ORDER.rbegin(); it != ORDER.rend(); ++it) {
+        if (!images[*it] || !images[*it]->pWorkspace)
+            continue;
+
+        if (getOverviewWorkspaceBox(MONITOR, scale->value(), viewOffset->value(), workspaceOverviewOffset(*it, ACTIVEIDX, PITCH), layout).containsPoint(point))
+            return *it;
+    }
+
+    return images.size();
+}
+
 float CScrollOverview::workspaceOverviewLogicalOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const {
-    const auto EXTRAINTERVAL = [this](size_t workspaceIdx_) -> float {
-        if (workspaceIdx_ + 1 >= images.size() || !images[workspaceIdx_] || !images[workspaceIdx_ + 1])
+    const bool CAROUSEL      = ScrollOverview::Config::getCarousel(pMonitor.lock());
+    const auto EXTRAINTERVAL = [this, CAROUSEL](size_t workspaceIdx_) -> float {
+        // The carousel positions cards by index alone (carouselPosition), so
+        // window overflow must not change the spacing it scrolls through.
+        if (CAROUSEL || workspaceIdx_ + 1 >= images.size() || !images[workspaceIdx_] || !images[workspaceIdx_ + 1])
             return 0.F;
 
         if (layout == ScrollOverview::Config::ELayout::HORIZONTAL)
@@ -2167,7 +2236,12 @@ PHLWINDOW CScrollOverview::windowAtOverviewPoint(const Vector2D& point, size_t* 
         return nullptr;
 
     const auto WORKSPACEPITCH = getWorkspaceRenderedPitch(MONITOR, scale->value(), layout);
+    const bool CAROUSEL       = ScrollOverview::Config::getCarousel(MONITOR);
+    const auto FRONTCARD      = CAROUSEL ? carouselCardAt(point) : images.size();
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
+        if (CAROUSEL && workspaceIdx != FRONTCARD)
+            continue;
+
         const auto& wimg = images[workspaceIdx];
         const auto  offset = workspaceOverviewOffset(workspaceIdx, activeIdx, WORKSPACEPITCH);
 
@@ -2505,6 +2579,17 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewPoint(const Vector2D& point, si
     if (!MONITOR)
         return nullptr;
 
+    if (ScrollOverview::Config::getCarousel(MONITOR)) {
+        const auto FRONTCARD = carouselCardAt(point);
+        if (FRONTCARD >= images.size() || !images[FRONTCARD])
+            return nullptr;
+
+        if (hoveredWorkspaceIdx)
+            *hoveredWorkspaceIdx = FRONTCARD;
+
+        return images[FRONTCARD]->pWorkspace;
+    }
+
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         const auto& wimg = images[workspaceIdx];
         if (!wimg || !wimg->pWorkspace)
@@ -2529,6 +2614,21 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewDropPoint(const Vector2D& point
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR)
         return nullptr;
+
+    // Carousel: drop on whichever card is in front at the point.
+    if (ScrollOverview::Config::getCarousel(MONITOR)) {
+        const auto FRONTCARD = carouselCardAt(point);
+        if (FRONTCARD >= images.size() || !images[FRONTCARD] || !images[FRONTCARD]->pWorkspace)
+            return nullptr;
+
+        if (draggedWindow && !overviewDropAllowed(draggedWindow, draggedWindow->m_workspace, images[FRONTCARD]->pWorkspace, MONITOR))
+            return nullptr;
+
+        if (hoveredWorkspaceIdx)
+            *hoveredWorkspaceIdx = FRONTCARD;
+
+        return images[FRONTCARD]->pWorkspace;
+    }
 
     const auto ACTIVEIDX       = activeWorkspaceIndex();
     const auto WORKSPACEPITCH = getWorkspaceRenderedPitch(MONITOR, scale->value(), layout);
@@ -2677,7 +2777,11 @@ Vector2D CScrollOverview::overviewPointToGlobal(size_t workspaceIdx, const Vecto
     const auto  VIEWPORT_CENTER_LOGICAL = CBox{{}, MONITOR->m_size}.middle();
     const auto  WORKSPACE_OFFSET   = workspaceOverviewOffset(workspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
 
-    return ((pointLocal - axisOffsetVector(WORKSPACE_OFFSET, layout) + viewOffset->value() * scale->value() * SAFE_MON_SCALE - VIEWPORT_CENTER) * (1.F / (SAFE_SCALE * SAFE_MON_SCALE))) +
+    // Inverse of getOverviewBox for this card.
+    const auto  CARD_SCALE       = SAFE_SCALE * std::max(WORKSPACE_OFFSET.scaleMul, 0.01F);
+    const auto  VIEWTRANSLATION  = WORKSPACE_OFFSET.absolute ? Vector2D{} : -viewOffset->value() * scale->value() * SAFE_MON_SCALE;
+
+    return ((pointLocal - axisOffsetVector(WORKSPACE_OFFSET.offset, layout) - VIEWTRANSLATION - VIEWPORT_CENTER) * (1.F / (CARD_SCALE * SAFE_MON_SCALE))) +
         VIEWPORT_CENTER_LOGICAL + MONITOR->m_position;
 }
 
@@ -4361,16 +4465,18 @@ void CScrollOverview::renderWorkspaceBackground(PHLMONITOR monitor, size_t works
             workspace->m_alpha->value() = PREVIOUSALPHA;
     });
 
-    renderOverviewWorkspaceShadow(monitor, WORKSPACEBOX, renderScale, wallpaperMode == 0, WORKSPACEALPHA);
+    const float CARDSCALE = renderScale * WORKSPACEOFFSET.scaleMul;
+
+    renderOverviewWorkspaceShadow(monitor, WORKSPACEBOX, CARDSCALE, wallpaperMode == 0, WORKSPACEALPHA);
 
     if (ScrollOverview::Config::getBlur(pMonitor.lock()) && wallpaperMode != 1 && WORKSPACEALPHA > 0.001F)
         OverviewRender::queueBlur(WORKSPACEBOX, 0, 2.F, WORKSPACEALPHA, false);
 
     if (wallpaperMode != 0 && WORKSPACEALPHA > 0.001F)
-        renderWallpaperLayers(monitor, WORKSPACEBOX, renderScale, now, WORKSPACEALPHA);
+        renderWallpaperLayers(monitor, WORKSPACEBOX, CARDSCALE, now, WORKSPACEALPHA);
 
     if (WORKSPACEALPHA >= 0.999F)
-        renderOverviewLayerLevel(monitor, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, WORKSPACEBOX, renderScale, now);
+        renderOverviewLayerLevel(monitor, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, WORKSPACEBOX, CARDSCALE, now);
 }
 
 void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale, int wallpaperMode, const Time::steady_tp& now) {
@@ -4380,7 +4486,8 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
 
     const auto WORKSPACEOFFSET = workspaceOverviewOffset(workspaceIdx, activeIdx, workspacePitch);
     const auto WORKSPACEBOX     = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), WORKSPACEOFFSET, layout);
-    const auto VISIBLEBOX       = workspaceOverviewVisibleBox(workspaceIdx, WORKSPACEBOX, renderScale, monitor);
+    const float CARDSCALE       = renderScale * WORKSPACEOFFSET.scaleMul;
+    const auto VISIBLEBOX       = workspaceOverviewVisibleBox(workspaceIdx, WORKSPACEBOX, CARDSCALE, monitor);
 
     if (!overviewBoxIntersectsMonitor(VISIBLEBOX, monitor))
         return;
@@ -4414,7 +4521,7 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
         if (!overviewBoxIntersectsMonitor(windowBox, monitor))
             return;
 
-        renderWindowLive(monitor, window, windowBox, renderScale, now, &WORKSPACEBOX);
+        renderWindowLive(monitor, window, windowBox, CARDSCALE, now, &WORKSPACEBOX);
     };
 
     const auto fullscreenWindow = getOverviewWindowToShow(Fullscreen::controller()->getFullscreenWindow(workspace));
@@ -4445,7 +4552,7 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
             .workspace             = workspace,
             .workspaceUsableBox    = getOverviewWorkspaceUsableBox(workspace, monitor, renderScale, viewOffset->value(), WORKSPACEOFFSET, layout),
             .anchor                = ANCHOR,
-            .renderScale           = renderScale,
+            .renderScale           = CARDSCALE,
             .workspaceFullyVisible = overviewBoxFullyVisibleOnMonitor(WORKSPACEBOX, monitor),
             .floating              = DRAGGED->m_isFloating,
             .layout                = layout,
@@ -4506,6 +4613,15 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
     const auto  PILLCOLOR =
         workspaceImage->pWorkspace->m_isSpecialWorkspace ? CHyprColor{0.42F, 0.18F, 0.66F, PILLALPHA} : CHyprColor{0.F, 0.F, 0.F, PILLALPHA};
 
+    // In the carousel a card below the middle one peeks out at its bottom
+    // edge, so its badges go there; everything else is labelled at the top.
+    float y = WORKSPACEBOX.y + PAD;
+    if (ScrollOverview::Config::getCarousel(monitor) && layout == ScrollOverview::Config::ELayout::VERTICAL &&
+        carouselPosition(workspaceIdx, activeIdx, getWorkspaceLogicalPitch(monitor, renderScale, layout)) > 0.5F) {
+        const float BADGEHEIGHT = std::round(FONTPX * 1.2F) + PAD; // close enough to the text texture height
+        y = WORKSPACEBOX.y + WORKSPACEBOX.height - PAD - BADGEHEIGHT;
+    }
+
     float x = WORKSPACEBOX.x + PAD;
     for (const auto& TEXT : overviewWorkspaceLabels(workspaceImage->pWorkspace)) {
         auto& tex = labelTextures[TEXT + "\n" + std::to_string(FONTPX)];
@@ -4514,7 +4630,7 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
         if (!tex || !tex->ok())
             continue;
 
-        CBox pillBox = {x, WORKSPACEBOX.y + PAD, tex->m_size.x + PAD * 2.F, tex->m_size.y + PAD};
+        CBox pillBox = {x, y, tex->m_size.x + PAD * 2.F, tex->m_size.y + PAD};
         pillBox.round();
 
         CRectPassElement::SRectData pill;
@@ -4572,7 +4688,15 @@ void CScrollOverview::renderEmptyWorkspaceToggle(PHLMONITOR monitor) {
     // (just under it when the gap is too small); side by side, just under it.
     const auto  CENTERCARD = getOverviewWorkspaceBox(monitor, scale->value(), Vector2D{}, 0.F, layout);
     const float GAP        = sc<float>(ScrollOverview::Config::getWorkspaceGap(monitor)) * monitor->m_scale;
-    const float BELOW      = layout == ScrollOverview::Config::ELayout::VERTICAL && GAP > HEIGHT + PAD ? (GAP - HEIGHT) / 2.F : PAD;
+    float       BELOW      = layout == ScrollOverview::Config::ELayout::VERTICAL && GAP > HEIGHT + PAD ? (GAP - HEIGHT) / 2.F : PAD;
+
+    // In the carousel the cards after the middle one peek out below it, one
+    // `peek` strip each up to `depth`; the toolbar goes under that stack.
+    if (ScrollOverview::Config::getCarousel(monitor) && layout == ScrollOverview::Config::ELayout::VERTICAL) {
+        const size_t AFTER = images.empty() || viewportCurrentWorkspace >= images.size() ? 0 : images.size() - 1 - viewportCurrentWorkspace;
+        const float  STEPS = sc<float>(std::min<size_t>(AFTER, ScrollOverview::Config::getCarouselDepth(monitor)));
+        BELOW              = ScrollOverview::Config::getCarouselPeek(monitor) * CENTERCARD.height * STEPS + PAD;
+    }
     CBox        pillBox    = {CENTERCARD.x + (CENTERCARD.width - WIDTH) / 2.F, CENTERCARD.y + CENTERCARD.height + BELOW, WIDTH, HEIGHT};
     pillBox.round();
     emptyToggleBox = pillBox;
@@ -5006,7 +5130,7 @@ bool CScrollOverview::shouldSuppressRenderDamage() const {
     const auto PITCH     = getWorkspaceRenderedPitch(MONITOR, SCALE, layout);
     const auto DRAGGED   = getOverviewWindowToShow(dragActiveWindow.lock());
 
-    const auto isVisibleAnimatedWindow = [&](const PHLWINDOW& window, float workspaceOffset) {
+    const auto isVisibleAnimatedWindow = [&](const PHLWINDOW& window, const SCardOffset& workspaceOffset) {
         if (!shouldShowOverviewWindow(window) || window == DRAGGED)
             return false;
 
@@ -5084,7 +5208,7 @@ void CScrollOverview::sendOverviewFrameCallbacks(const Time::steady_tp& now) {
     sendingOverviewFrameCallbacks        = CANFRAMETHROTTLEDWINDOWS;
     auto resetSendingFrameCallbacks      = Hyprutils::Utils::CScopeGuard([this, PREVSENDINGFRAMECALLBACKS] { sendingOverviewFrameCallbacks = PREVSENDINGFRAMECALLBACKS; });
 
-    const auto frameWindow = [&](const PHLWINDOW& window, float workspaceOffset, bool realtime) {
+    const auto frameWindow = [&](const PHLWINDOW& window, const SCardOffset& workspaceOffset, bool realtime) {
         if (!shouldShowOverviewWindow(window))
             return;
 
@@ -5716,6 +5840,28 @@ void CScrollOverview::render() {
 
     Event::bus()->m_events.render.stage.emit(RENDER_POST_WALLPAPER);
 
+    // Carousel cards overlap, so each one is painted whole (background,
+    // windows, label) from the back of the stack to the front, instead of all
+    // backgrounds first and all windows after, which would draw a back card's
+    // windows over the front card.
+    if (ScrollOverview::Config::getCarousel(MONITOR)) {
+        const bool NEEDS_PRECOMPUTED_BLUR = hasVisiblePrecomputedBlurWindow(MONITOR, ACTIVEIDX, PITCH, SCALE);
+        if (NEEDS_PRECOMPUTED_BLUR && overviewBlurDirty)
+            g_pHyprRenderer->m_renderPass.add(makeUnique<CPreBlurElement>());
+
+        OverviewRender::flushPass(MONITOR);
+
+        if (NEEDS_PRECOMPUTED_BLUR)
+            overviewBlurDirty = false;
+
+        for (const auto workspaceIdx : cardPaintOrder()) {
+            renderWorkspaceBackground(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
+            OverviewRender::flushPass(MONITOR);
+            renderWorkspaceLive(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
+            renderWorkspaceLabel(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE);
+        }
+    } else {
+
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         renderWorkspaceBackground(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
     }
@@ -5751,6 +5897,9 @@ void CScrollOverview::render() {
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
         renderWorkspaceLabel(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE);
     }
+
+    }
+
     renderEmptyWorkspaceToggle(MONITOR);
 
     renderDraggedWindow(MONITOR, ACTIVEIDX, PITCH, SCALE, NOW);

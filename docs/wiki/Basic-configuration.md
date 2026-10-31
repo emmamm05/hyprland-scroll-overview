@@ -45,6 +45,7 @@ end)
 | input | structure | input configuration subcategory; accepts a structure containing the properties listed below | see below |
 | shadow | structure | shadow configuration subcategory; accepts a structure containing the properties listed below | see below |
 | label | structure | workspace label subcategory; accepts a structure containing the properties listed below | see below |
+| carousel | structure | carousel subcategory; accepts a structure containing the properties listed below | see below |
 
 ### Subcategory `input`
 
@@ -67,6 +68,17 @@ Draws a small label in the top-left corner of each workspace card: a badge with 
 | --- | --- | --- | --- |
 | enabled | bool | label each workspace card | `false` |
 | font_size | int | label font size in logical px, [4–96]; not scaled with the overview, so it stays readable when zoomed out. Uses `misc:font_family` | `16` |
+
+### Subcategory `carousel`
+
+Turns the overview into a carousel: the selected card stays in the middle at the overview scale, in front, and the other cards stack behind it, each step back a little smaller and pushed towards the top (cards before it) or bottom (cards after it) so only an edge peeks out. Scrolling, keyboard navigation and gestures animate through the stack. Clicks and drops go to the front-most card under the pointer, and a card's labels sit on the edge that peeks out. Window overflow does not change the spacing in a carousel.
+
+| property | type | description | default |
+| --- | --- | --- | --- |
+| enabled | bool | use the carousel layout | `false` |
+| scale_step | float | scale of each card relative to the one in front of it, [0.3–1] | `0.9` |
+| peek | float | how far each card peeks out past the one in front of it, as a fraction of a card, [0–0.5] | `0.05` |
+| depth | int | cards visible on each side of the selected one, [1–10]; further cards are hidden behind the last visible one | `3` |
 
 ### Subcategory `shadow`
 

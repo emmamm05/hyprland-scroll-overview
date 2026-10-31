@@ -422,6 +422,12 @@ static void defineConfigValues() {
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:blur", "blur the overview wallpaper", false));
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:special_workspaces", "show special workspaces after the regular ones", false));
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:special_workspace_drag", "allow dragging windows into, out of and between special workspaces", false));
+    addValue(makeShared<CBoolValue>("plugin:scrolloverview:carousel:enabled", "stack non-selected cards behind the selected one, smaller and peeking out", false));
+    addValue(makeShared<CFloatValue>("plugin:scrolloverview:carousel:scale_step", "carousel card scale per step back from the selected one", 0.9F,
+                                     SFloatValueOptions{.min = 0.3F, .max = 1.F}));
+    addValue(makeShared<CFloatValue>("plugin:scrolloverview:carousel:peek", "how far each carousel step peeks out past the one in front, as a fraction of a card", 0.05F,
+                                     SFloatValueOptions{.min = 0.F, .max = 0.5F}));
+    addValue(makeShared<CIntValue>("plugin:scrolloverview:carousel:depth", "carousel steps visible on each side of the selected card", 3, SIntValueOptions{.min = 1, .max = 10}));
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:empty_workspace_toggle", "show a \"Show empty workspaces\" checkbox; unchecked hides workspaces without windows", false));
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:label:enabled", "label each workspace card with its number and name", false));
     addValue(makeShared<CIntValue>("plugin:scrolloverview:label:font_size", "workspace label font size", 16, SIntValueOptions{.min = 4, .max = 96}));
@@ -531,6 +537,22 @@ bool getSpecialWorkspaces(PHLMONITOR monitor) {
 
 bool getSpecialWorkspaceDrag(PHLMONITOR monitor) {
     return getValue<bool>("plugin:scrolloverview:special_workspace_drag", monitor);
+}
+
+bool getCarousel(PHLMONITOR monitor) {
+    return getValue<bool>("plugin:scrolloverview:carousel:enabled", monitor);
+}
+
+float getCarouselScaleStep(PHLMONITOR monitor) {
+    return std::clamp(getValue<float>("plugin:scrolloverview:carousel:scale_step", monitor), 0.3F, 1.F);
+}
+
+float getCarouselPeek(PHLMONITOR monitor) {
+    return std::clamp(getValue<float>("plugin:scrolloverview:carousel:peek", monitor), 0.F, 0.5F);
+}
+
+int getCarouselDepth(PHLMONITOR monitor) {
+    return std::clamp(getValue<int>("plugin:scrolloverview:carousel:depth", monitor), 1, 10);
 }
 
 bool getEmptyWorkspaceToggle(PHLMONITOR monitor) {
