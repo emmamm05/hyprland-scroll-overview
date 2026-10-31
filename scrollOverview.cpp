@@ -2024,6 +2024,11 @@ std::vector<size_t> CScrollOverview::cardPaintOrder() const {
 // The front-most carousel card under a point, or images.size() for none.
 // Cards overlap in the carousel, so hit tests must stop at the first card that
 // covers the point rather than reach cards hidden behind it.
+//
+// A card covers its own box and also its windows: a scrolling workspace's
+// columns scrolled out of view are drawn past the card's edges (the overflow
+// workspaceOverviewVisibleBox makes room for), on top of the cards behind it.
+// Testing the box alone made those windows impossible to grab or drop onto.
 size_t CScrollOverview::carouselCardAt(const Vector2D& point) const {
     const auto MONITOR = pMonitor.lock();
     if (!MONITOR)
@@ -2036,8 +2041,16 @@ size_t CScrollOverview::carouselCardAt(const Vector2D& point) const {
         if (!images[*it] || !images[*it]->pWorkspace)
             continue;
 
-        if (getOverviewWorkspaceBox(MONITOR, scale->value(), viewOffset->value(), workspaceOverviewOffset(*it, ACTIVEIDX, PITCH), layout).containsPoint(point))
+        const auto OFFSET = workspaceOverviewOffset(*it, ACTIVEIDX, PITCH);
+        if (getOverviewWorkspaceBox(MONITOR, scale->value(), viewOffset->value(), OFFSET, layout).containsPoint(point))
             return *it;
+
+        for (const auto& weak : images[*it]->windows) {
+            const auto window = getOverviewWindowToShow(weak.lock());
+            if (shouldShowOverviewWindow(window) &&
+                getOverviewWindowBox(window, MONITOR, scale->value(), viewOffset->value(), OFFSET, layout).containsPoint(point))
+                return *it;
+        }
     }
 
     return images.size();
