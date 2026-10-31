@@ -422,6 +422,8 @@ static void defineConfigValues() {
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:blur", "blur the overview wallpaper", false));
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:special_workspaces", "show special workspaces after the regular ones", false));
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:special_workspace_drag", "allow dragging windows into, out of and between special workspaces", false));
+    addValue(makeShared<CFloatValue>("plugin:scrolloverview:empty_workspace_size", "card length of a workspace without windows, as a fraction of a normal card", 1.F,
+                                     SFloatValueOptions{.min = 0.1F, .max = 1.F}));
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:label:enabled", "label each workspace card with its number and name", false));
     addValue(makeShared<CIntValue>("plugin:scrolloverview:label:font_size", "workspace label font size", 16, SIntValueOptions{.min = 4, .max = 96}));
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:shadow:enabled", "draw a shadow around each workspace card", false));
@@ -530,6 +532,10 @@ bool getSpecialWorkspaces(PHLMONITOR monitor) {
 
 bool getSpecialWorkspaceDrag(PHLMONITOR monitor) {
     return getValue<bool>("plugin:scrolloverview:special_workspace_drag", monitor);
+}
+
+float getEmptyWorkspaceSize(PHLMONITOR monitor) {
+    return std::clamp(getValue<float>("plugin:scrolloverview:empty_workspace_size", monitor), 0.1F, 1.F);
 }
 
 bool getLabelEnabled(PHLMONITOR monitor) {

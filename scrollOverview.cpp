@@ -1942,14 +1942,21 @@ float CScrollOverview::workspaceOverviewOffset(size_t workspaceIdx, size_t activ
 }
 
 float CScrollOverview::workspaceOverviewLogicalOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const {
-    const auto EXTRAINTERVAL = [this](size_t workspaceIdx_) -> float {
+    const auto MONITOR       = pMonitor.lock();
+    const auto CARDLENGTH    = MONITOR ? axisSize(MONITOR->m_size, layout) : 0.F;
+    const auto EXTRAINTERVAL = [this, CARDLENGTH](size_t workspaceIdx_) -> float {
         if (workspaceIdx_ + 1 >= images.size() || !images[workspaceIdx_] || !images[workspaceIdx_ + 1])
             return 0.F;
 
-        if (layout == ScrollOverview::Config::ELayout::HORIZONTAL)
-            return images[workspaceIdx_]->overflowRight + images[workspaceIdx_ + 1]->overflowLeft;
+        // A compact card (empty_workspace_size) is shorter by (1 - size) of a
+        // full card, half on each side of its centre, so the interval between
+        // two neighbouring centres shrinks by half of each card's reduction.
+        const float COMPACTION = ((1.F - workspaceCardSize(workspaceIdx_)) + (1.F - workspaceCardSize(workspaceIdx_ + 1))) * CARDLENGTH / 2.F;
 
-        return images[workspaceIdx_]->overflowBottom + images[workspaceIdx_ + 1]->overflowTop;
+        if (layout == ScrollOverview::Config::ELayout::HORIZONTAL)
+            return images[workspaceIdx_]->overflowRight + images[workspaceIdx_ + 1]->overflowLeft - COMPACTION;
+
+        return images[workspaceIdx_]->overflowBottom + images[workspaceIdx_ + 1]->overflowTop - COMPACTION;
     };
 
     float offset = 0.F;
@@ -1979,6 +1986,87 @@ float CScrollOverview::workspaceOverviewAlpha(size_t workspaceIdx) const {
         return 1.F;
 
     return std::clamp(workspaceInsertFadeProgress->value(), 0.F, 1.F);
+}
+
+float CScrollOverview::workspaceCardSize(size_t workspaceIdx) const {
+    if (workspaceIdx >= images.size() || !images[workspaceIdx] || !images[workspaceIdx]->pWorkspace)
+        return 1.F;
+
+    const auto IT = workspaceCardSizes.find(images[workspaceIdx]->pWorkspace->m_id);
+    return IT == workspaceCardSizes.end() || !IT->second.size ? 1.F : std::clamp(IT->second.size->value(), 0.1F, 1.F);
+}
+
+float CScrollOverview::workspaceCardWallpaperAlpha(size_t workspaceIdx) const {
+    if (workspaceIdx >= images.size() || !images[workspaceIdx] || !images[workspaceIdx]->pWorkspace)
+        return 1.F;
+
+    const auto IT = workspaceCardSizes.find(images[workspaceIdx]->pWorkspace->m_id);
+    return IT == workspaceCardSizes.end() || !IT->second.wallpaperAlpha ? 1.F : std::clamp(IT->second.wallpaperAlpha->value(), 0.F, 1.F);
+}
+
+// The card shortened around its centre along the stacking axis.
+CBox CScrollOverview::workspaceCardBox(size_t workspaceIdx, CBox fullBox) const {
+    const float SIZE = workspaceCardSize(workspaceIdx);
+    if (SIZE >= 0.999F)
+        return fullBox;
+
+    if (layout == ScrollOverview::Config::ELayout::HORIZONTAL) {
+        const double WIDTH = fullBox.width * SIZE;
+        fullBox.x += (fullBox.width - WIDTH) / 2.0;
+        fullBox.width = WIDTH;
+    } else {
+        const double HEIGHT = fullBox.height * SIZE;
+        fullBox.y += (fullBox.height - HEIGHT) / 2.0;
+        fullBox.height = HEIGHT;
+    }
+
+    return fullBox.round();
+}
+
+// Compact the cards of workspaces without windows (empty_workspace_size),
+// except the selected card and the one a dragged window is over, which expand
+// to full size. The card's own wallpaper is not clipped to the card, so it is
+// only drawn once the card is fully expanded, fading in from there.
+void CScrollOverview::updateWorkspaceCardSizes() {
+    const auto MONITOR = pMonitor.lock();
+    if (!MONITOR)
+        return;
+
+    const float COMPACT = ScrollOverview::Config::getEmptyWorkspaceSize(MONITOR);
+
+    size_t     dragHoverIdx = images.size();
+    auto*      dragContext  = g_pointerGrabOverview && g_pointerGrabOverview->dragActiveWindow ? g_pointerGrabOverview : nullptr;
+    const auto DRAGGED      = dragContext ? getOverviewWindowToShow(dragContext->dragActiveWindow.lock()) : PHLWINDOW{};
+    if (DRAGGED && isOverviewPointerOnMonitor(MONITOR))
+        workspaceAtOverviewDropPoint(lastMousePosLocal, &dragHoverIdx, DRAGGED);
+
+    const auto WINDOWSMOVECONFIG = Config::animationTree()->getAnimationPropertyConfig("windowsMove");
+
+    for (size_t i = 0; i < images.size(); ++i) {
+        const auto& IMAGE = images[i];
+        if (!IMAGE || !IMAGE->pWorkspace)
+            continue;
+
+        const bool  EXPANDED = COMPACT >= 0.999F || !IMAGE->windows.empty() || i == viewportCurrentWorkspace || i == dragHoverIdx;
+        const float TARGET   = EXPANDED ? 1.F : COMPACT;
+
+        auto& card = workspaceCardSizes[IMAGE->pWorkspace->m_id];
+        if (!card.size) {
+            // First sight of this card: start at its target, no animation.
+            Animation::mgr()->createAnimation(TARGET, card.size, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
+            Animation::mgr()->createAnimation(TARGET >= 0.999F ? 1.F : 0.F, card.wallpaperAlpha, WINDOWSMOVECONFIG, AVARDAMAGE_NONE);
+            card.size->setUpdateCallback([this](auto) { damage(); });
+            card.wallpaperAlpha->setUpdateCallback([this](auto) { damage(); });
+        }
+
+        if (card.size->goal() != TARGET)
+            *card.size = TARGET;
+
+        if (TARGET < 0.999F || card.size->value() < 0.999F)
+            card.wallpaperAlpha->setValueAndWarp(0.F);
+        else if (card.wallpaperAlpha->goal() != 1.F)
+            *card.wallpaperAlpha = 1.F;
+    }
 }
 
 void CScrollOverview::rebuildWorkspaceImages() {
@@ -2475,9 +2563,10 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewPoint(const Vector2D& point, si
         if (!wimg || !wimg->pWorkspace)
             continue;
 
-        const auto WORKSPACEBOX = getOverviewWorkspaceUsableBox(wimg->pWorkspace, MONITOR, scale->value(), viewOffset->value(),
-                                                                workspaceOverviewOffset(workspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout)),
-                                                                layout);
+        const auto OFFSET       = workspaceOverviewOffset(workspaceIdx, activeWorkspaceIndex(), getWorkspaceRenderedPitch(MONITOR, scale->value(), layout));
+        const auto WORKSPACEBOX = workspaceCardSize(workspaceIdx) < 0.999F ?
+            workspaceCardBox(workspaceIdx, getOverviewWorkspaceBox(MONITOR, scale->value(), viewOffset->value(), OFFSET, layout)) :
+            getOverviewWorkspaceUsableBox(wimg->pWorkspace, MONITOR, scale->value(), viewOffset->value(), OFFSET, layout);
 
         if (WORKSPACEBOX.containsPoint(point)) {
             if (hoveredWorkspaceIdx)
@@ -2533,8 +2622,10 @@ PHLWORKSPACE CScrollOverview::workspaceAtOverviewDropPoint(const Vector2D& point
         if (draggedWindow && !overviewDropAllowed(draggedWindow, draggedWindow->m_workspace, wimg->pWorkspace, MONITOR))
             continue;
 
-        const auto WORKSPACEBOX = getOverviewWorkspaceUsableBox(wimg->pWorkspace, MONITOR, scale->value(), viewOffset->value(),
-                                                                workspaceOverviewOffset(workspaceIdx, ACTIVEIDX, WORKSPACEPITCH), layout);
+        const auto OFFSET       = workspaceOverviewOffset(workspaceIdx, ACTIVEIDX, WORKSPACEPITCH);
+        const auto WORKSPACEBOX = workspaceCardSize(workspaceIdx) < 0.999F ?
+            workspaceCardBox(workspaceIdx, getOverviewWorkspaceBox(MONITOR, scale->value(), viewOffset->value(), OFFSET, layout)) :
+            getOverviewWorkspaceUsableBox(wimg->pWorkspace, MONITOR, scale->value(), viewOffset->value(), OFFSET, layout);
         const bool ONLAYOUTAXIS = layout == ScrollOverview::Config::ELayout::HORIZONTAL ?
             point.x >= WORKSPACEBOX.x && point.x <= WORKSPACEBOX.x + WORKSPACEBOX.width :
             point.y >= WORKSPACEBOX.y && point.y <= WORKSPACEBOX.y + WORKSPACEBOX.height;
@@ -4301,8 +4392,10 @@ void CScrollOverview::renderWorkspaceBackground(PHLMONITOR monitor, size_t works
         return;
 
     const auto WORKSPACEOFFSET = workspaceOverviewOffset(workspaceIdx, activeIdx, workspacePitch);
-    const auto WORKSPACEBOX     = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), WORKSPACEOFFSET, layout);
+    const auto FULLBOX          = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), WORKSPACEOFFSET, layout);
+    const auto WORKSPACEBOX     = workspaceCardBox(workspaceIdx, FULLBOX);
     const auto WORKSPACEALPHA   = workspaceOverviewAlpha(workspaceIdx);
+    const auto WALLPAPERALPHA   = WORKSPACEALPHA * workspaceCardWallpaperAlpha(workspaceIdx);
 
     if (!overviewBoxIntersectsMonitor(WORKSPACEBOX, monitor))
         return;
@@ -4326,16 +4419,18 @@ void CScrollOverview::renderWorkspaceBackground(PHLMONITOR monitor, size_t works
             workspace->m_alpha->value() = PREVIOUSALPHA;
     });
 
-    renderOverviewWorkspaceShadow(monitor, WORKSPACEBOX, renderScale, wallpaperMode == 0, WORKSPACEALPHA);
+    renderOverviewWorkspaceShadow(monitor, WORKSPACEBOX, renderScale, wallpaperMode == 0 || WALLPAPERALPHA < 0.999F, WORKSPACEALPHA);
 
     if (ScrollOverview::Config::getBlur(pMonitor.lock()) && wallpaperMode != 1 && WORKSPACEALPHA > 0.001F)
         OverviewRender::queueBlur(WORKSPACEBOX, 0, 2.F, WORKSPACEALPHA, false);
 
-    if (wallpaperMode != 0 && WORKSPACEALPHA > 0.001F)
-        renderWallpaperLayers(monitor, WORKSPACEBOX, renderScale, now, WORKSPACEALPHA);
+    // The layers below are drawn at full card size and not clipped, so a
+    // compact card skips them (see updateWorkspaceCardSizes).
+    if (wallpaperMode != 0 && WALLPAPERALPHA > 0.001F)
+        renderWallpaperLayers(monitor, FULLBOX, renderScale, now, WALLPAPERALPHA);
 
-    if (WORKSPACEALPHA >= 0.999F)
-        renderOverviewLayerLevel(monitor, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, WORKSPACEBOX, renderScale, now);
+    if (WALLPAPERALPHA >= 0.999F)
+        renderOverviewLayerLevel(monitor, ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM, FULLBOX, renderScale, now);
 }
 
 void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale, int wallpaperMode, const Time::steady_tp& now) {
@@ -4454,7 +4549,8 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
     if (!workspaceImage || !workspaceImage->pWorkspace)
         return;
 
-    const auto WORKSPACEBOX   = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), workspaceOverviewOffset(workspaceIdx, activeIdx, workspacePitch), layout);
+    const auto WORKSPACEBOX   = workspaceCardBox(workspaceIdx,
+                                                 getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), workspaceOverviewOffset(workspaceIdx, activeIdx, workspacePitch), layout));
     const auto WORKSPACEALPHA = workspaceOverviewAlpha(workspaceIdx);
     if (WORKSPACEALPHA <= 0.001F || !overviewBoxIntersectsMonitor(WORKSPACEBOX, monitor))
         return;
@@ -5401,6 +5497,7 @@ void CScrollOverview::onPreRender() {
 
     forceLayersAboveFullscreen();
     updateWorkspaceOverflow();
+    updateWorkspaceCardSizes();
 
     if (closing)
         return;

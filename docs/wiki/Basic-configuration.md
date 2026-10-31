@@ -40,6 +40,7 @@ end)
 | wallpaper | int | wallpaper mode: `0` global only, `1` per-workspace only, `2` both | `0` |
 | blur | bool | blur the main overview wallpaper without blurring workspace wallpapers | `false` |
 | special_workspaces | bool | show special workspaces (scratchpads) after the regular ones, sorted by name. Each appears on the monitor it was last opened on. Selecting one opens it over the current workspace; selecting a regular workspace closes an open special | `false` |
+| empty_workspace_size | float | length of the card of a workspace with no windows, as a fraction of a normal card along the stacking axis, [0.1–1]; `1` disables it. A compact card shows its blurred backdrop rather than its own wallpaper, and expands to full size, wallpaper fading back in, while it is selected or a dragged window is over it | `1` |
 | special_workspace_drag | bool | allow dragging windows into, out of and between special workspaces. Without it a drop that would cross that boundary is refused and the window returns; moving windows within one workspace is unaffected. Pinned windows can never be dropped on a special workspace | `false` |
 | input | structure | input configuration subcategory; accepts a structure containing the properties listed below | see below |
 | shadow | structure | shadow configuration subcategory; accepts a structure containing the properties listed below | see below |
