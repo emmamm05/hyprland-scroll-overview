@@ -114,10 +114,6 @@ class CScrollOverview : public IOverview {
     float      workspaceOverviewOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const;
     float      workspaceOverviewLogicalOffset(size_t workspaceIdx, size_t activeIdx, float workspacePitch) const;
     float      workspaceOverviewAlpha(size_t workspaceIdx) const;
-    float      workspaceCardSize(size_t workspaceIdx) const;
-    float      workspaceCardWallpaperAlpha(size_t workspaceIdx) const;
-    CBox       workspaceCardBox(size_t workspaceIdx, CBox fullBox) const;
-    void       updateWorkspaceCardSizes();
     PHLWINDOW windowAtOverviewPoint(const Vector2D& point, size_t* workspaceIdx = nullptr) const;
     PHLWINDOW windowAtOverviewCursor(size_t* workspaceIdx = nullptr);
     PHLWINDOW windowAtOverviewCursorOnWorkspace(size_t workspaceIdx, const PHLWINDOW& ignoredWindow = nullptr, CBox* windowBox = nullptr) const;
@@ -265,13 +261,6 @@ class CScrollOverview : public IOverview {
     std::vector<SP<SWorkspaceImage>> images;
     std::vector<PHLWINDOWREF>        pinnedFloatingWindows;
     std::unordered_map<WORKSPACEID, PHLWINDOWREF> rememberedSelection;
-    // Animated card length (fraction of a full card) and the fade of the
-    // card's own wallpaper, per workspace; see empty_workspace_size.
-    struct SWorkspaceCardSize {
-        PHLANIMVAR<float> size;
-        PHLANIMVAR<float> wallpaperAlpha;
-    };
-    std::unordered_map<WORKSPACEID, SWorkspaceCardSize> workspaceCardSizes;
     // Where the "Show empty workspaces" checkbox was last drawn (monitor
     // pixels; empty until drawn) and whether a press started on it.
     CBox                             emptyToggleBox;
