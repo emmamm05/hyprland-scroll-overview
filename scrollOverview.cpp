@@ -343,6 +343,27 @@ static bool shouldShowPinnedFloatingOverviewWindow(const PHLWINDOW& window) {
     return true;
 }
 
+// A window that is mapped but drawn fully transparent by an opacity rule (e.g.
+// xwaylandvideobridge's proxy, "opacity 0.0 override") shows nothing, so it
+// doesn't make its workspace non-empty for empty_workspace_toggle and
+// empty_workspace_size.
+static bool isVisibleOverviewWindow(const PHLWINDOW& window) {
+    const auto WINDOW = getOverviewWindowToShow(window);
+    if (!shouldShowOverviewWindow(WINDOW))
+        return false;
+
+    return WINDOW->m_ruleApplicator->alpha().valueOrDefault().applyAlpha(1.F) > 0.01F;
+}
+
+static bool workspaceHasVisibleWindows(const PHLWORKSPACE& workspace) {
+    if (!workspace)
+        return false;
+
+    return std::ranges::any_of(Desktop::windowState()->windows(), [&workspace](const auto& window) {
+        return window && window->m_workspace == workspace && isVisibleOverviewWindow(window);
+    });
+}
+
 static bool surfaceTreeHasFrameCallbacks(SP<CWLSurfaceResource> surface) {
     if (!surface)
         return false;
@@ -2056,7 +2077,7 @@ void CScrollOverview::updateWorkspaceCardSizes() {
         if (!IMAGE || !IMAGE->pWorkspace)
             continue;
 
-        const bool  EXPANDED = COMPACT >= 0.999F || !IMAGE->windows.empty() || i == viewportCurrentWorkspace || i == dragHoverIdx;
+        const bool  EXPANDED = COMPACT >= 0.999F || workspaceHasVisibleWindows(IMAGE->pWorkspace) || i == viewportCurrentWorkspace || i == dragHoverIdx;
         const float TARGET   = EXPANDED ? 1.F : COMPACT;
 
         auto& card = workspaceCardSizes[IMAGE->pWorkspace->m_id];
@@ -2099,7 +2120,7 @@ void CScrollOverview::rebuildWorkspaceImages() {
 
         // Unchecked "Show empty workspaces": leave out workspaces without
         // windows, but never the one the overview is centred on or showing.
-        if (HIDEEMPTY && WORKSPACE->getWindowCount() == 0 && WORKSPACE != startedOn && WORKSPACE != viewportWorkspace && WORKSPACE != selectedWorkspace)
+        if (HIDEEMPTY && !workspaceHasVisibleWindows(WORKSPACE) && WORKSPACE != startedOn && WORKSPACE != viewportWorkspace && WORKSPACE != selectedWorkspace)
             continue;
 
         images.emplace_back(makeShared<SWorkspaceImage>(WORKSPACE));
@@ -4609,9 +4630,11 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
     }
 }
 
-// "Show empty workspaces" checkbox in the bottom-left corner, styled like the
-// workspace label badges. Fades in with the opening zoom and is gone while
-// closing; emptyToggleBox records where it is for the click handler.
+// "Show empty workspaces" checkbox, styled like the workspace label badges and
+// placed like a toolbar: centred under the card in the middle of the
+// carousel, in the gap before the next one. Fades in with the opening zoom and
+// is gone while closing; emptyToggleBox records where it is for the click
+// handler.
 void CScrollOverview::renderEmptyWorkspaceToggle(PHLMONITOR monitor) {
     emptyToggleBox = {};
     if (!monitor || closing || !ScrollOverview::Config::getEmptyWorkspaceToggle(monitor))
@@ -4639,7 +4662,15 @@ void CScrollOverview::renderEmptyWorkspaceToggle(PHLMONITOR monitor) {
 
     const float BOXSIZE = std::round(TEXT->m_size.y * 0.8F);
     const float HEIGHT  = TEXT->m_size.y + PAD;
-    CBox        pillBox = {PAD * 2.F, monitor->m_pixelSize.y - PAD * 2.F - HEIGHT, PAD + BOXSIZE + PAD + TEXT->m_size.x + PAD, HEIGHT};
+    const float WIDTH   = PAD + BOXSIZE + PAD + TEXT->m_size.x + PAD;
+
+    // The middle slot of the carousel, i.e. where the selected card rests.
+    // With cards stacked vertically the toolbar sits in the gap below it
+    // (just under it when the gap is too small); side by side, just under it.
+    const auto  CENTERCARD = getOverviewWorkspaceBox(monitor, scale->value(), Vector2D{}, 0.F, layout);
+    const float GAP        = sc<float>(ScrollOverview::Config::getWorkspaceGap(monitor)) * monitor->m_scale;
+    const float BELOW      = layout == ScrollOverview::Config::ELayout::VERTICAL && GAP > HEIGHT + PAD ? (GAP - HEIGHT) / 2.F : PAD;
+    CBox        pillBox    = {CENTERCARD.x + (CENTERCARD.width - WIDTH) / 2.F, CENTERCARD.y + CENTERCARD.height + BELOW, WIDTH, HEIGHT};
     pillBox.round();
     emptyToggleBox = pillBox;
 
