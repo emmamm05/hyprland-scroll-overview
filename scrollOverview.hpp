@@ -97,7 +97,7 @@ class CScrollOverview : public IOverview {
     void   seedRememberedSelections();
     void   redrawAll(bool forcelowres = false);
     void   onWorkspaceChange();
-    void   renderGlobalWallpaper(PHLMONITOR monitor, const Time::steady_tp& now);
+    void   renderGlobalWallpaper(Render::CRenderContext& ctx, PHLMONITOR monitor, const Time::steady_tp& now);
     void   renderWallpaperLayers(PHLMONITOR monitor, const CBox& workspaceBox, float renderScale, const Time::steady_tp& now, float alpha = 1.F);
     void   updateBackdropBlurCache(PHLMONITOR monitor, int wallpaperMode, const Time::steady_tp& now);
     void   renderBackdropBlurCache(PHLMONITOR monitor);
@@ -217,10 +217,10 @@ class CScrollOverview : public IOverview {
 
     struct SWorkspaceInsertTransition {
         bool                             active              = false;
-        WORKSPACEID                      transitionWorkspaceID = WORKSPACE_INVALID;
+        std::string                            transitionWorkspaceKey = "";
         bool                             transitionFadeIn   = true;
-        std::unordered_map<WORKSPACEID, float> oldRelativeOffsets;
-        std::unordered_map<WORKSPACEID, float> newRelativeOffsets;
+        std::unordered_map<std::string, float> oldRelativeOffsets;
+        std::unordered_map<std::string, float> newRelativeOffsets;
         float                            transitionOldRelativeOffset = 0.F;
     };
 
@@ -248,7 +248,7 @@ class CScrollOverview : public IOverview {
     CBox                             dragOriginalOverviewBox    = CBox{};
     CBox                             dragOriginalOverviewHitbox = CBox{};
     CBox                             resizeOriginalBox          = CBox{};
-    WORKSPACEID                      focusSyncedFromWorkspaceID = WORKSPACE_INVALID;
+    std::string                      focusSyncedFromWorkspaceKey       = "";
     size_t                           resizeWorkspaceIdx     = 0;
     Layout::eRectCorner              resizeCorner           = Layout::CORNER_NONE;
     bool                             dragPendingPrimary    = false;
@@ -278,7 +278,8 @@ class CScrollOverview : public IOverview {
 
     std::vector<SP<SWorkspaceImage>> images;
     std::vector<PHLWINDOWREF>        pinnedFloatingWindows;
-    std::unordered_map<WORKSPACEID, PHLWINDOWREF> rememberedSelection;
+    // Selectors distinguish numbered, named, and special workspace identities.
+    std::unordered_map<std::string, PHLWINDOWREF> rememberedSelection;
     // Where the "Show empty workspaces" checkbox was last drawn (monitor
     // pixels; empty until drawn) and whether a press started on it.
     CBox                             emptyToggleBox;
