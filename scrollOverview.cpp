@@ -4727,36 +4727,106 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
     const auto  TEXTCOLOR = ScrollOverview::Config::getLabelTextColor(monitor);
     const auto  TEXTKEY   = std::to_string(TEXTCOLOR.getAsHex());
 
-    // In the carousel a card below the middle one peeks out at its bottom
-    // edge, so its badges go there; everything else is labelled at the top.
-    float y = WORKSPACEBOX.y + PAD;
-    if (ScrollOverview::Config::getCarousel(monitor) && layout == ScrollOverview::Config::ELayout::VERTICAL &&
-        carouselPosition(workspaceIdx, activeIdx, getWorkspaceLogicalPitch(monitor, renderScale, layout)) > 0.5F) {
-        const float BADGEHEIGHT = std::round(FONTPX * 1.2F) + PAD; // close enough to the text texture height
-        y = WORKSPACEBOX.y + WORKSPACEBOX.height - PAD - BADGEHEIGHT;
-    }
-
-    float x = WORKSPACEBOX.x + PAD;
+    // Fetch the textures first: placement needs the real badge height, and
+    // the row width in the horizontal carousel.
+    std::vector<SP<Render::ITexture>> textures;
     for (const auto& TEXT : overviewWorkspaceLabels(workspaceImage->pWorkspace)) {
         auto& tex = labelTextures[TEXT + "\n" + std::to_string(FONTPX) + "\n" + TEXTKEY];
         if (!tex)
             tex = g_pHyprRenderer->renderText(TEXT, TEXTCOLOR, FONTPX, false, FONTFAMILY, 0, 600);
-        if (!tex || !tex->ok())
-            continue;
+        if (tex && tex->ok())
+            textures.emplace_back(tex);
+    }
+    if (textures.empty())
+        return;
 
+    float badgeHeight = 0.F, rowWidth = 0.F;
+    for (const auto& tex : textures) {
+        badgeHeight = std::max(badgeHeight, sc<float>(std::round(tex->m_size.y + PAD)));
+        rowWidth += std::round(tex->m_size.x + PAD * 2.F) + PAD / 2.F;
+    }
+    rowWidth -= PAD / 2.F;
+
+    float x       = WORKSPACEBOX.x + PAD;
+    float y       = WORKSPACEBOX.y + PAD;
+    CBox  clipBox = {};
+
+    // The carousel draws every label after all cards (see renderOverview), so
+    // a label is placed inside the part of its own card that the cards in
+    // front of it leave visible: the strip at the top (left) for cards behind
+    // the middle one, at the bottom (right) for cards after it.
+    if (ScrollOverview::Config::getCarousel(monitor)) {
+        const bool  VERTICAL     = layout == ScrollOverview::Config::ELayout::VERTICAL;
+        const float LOGICALPITCH = getWorkspaceLogicalPitch(monitor, renderScale, layout);
+        const float CARDSTART    = VERTICAL ? WORKSPACEBOX.y : WORKSPACEBOX.x;
+        const float CARDEND      = CARDSTART + (VERTICAL ? WORKSPACEBOX.height : WORKSPACEBOX.width);
+        float       visibleStart = CARDSTART, visibleEnd = CARDEND;
+
+        const auto  ORDER = cardPaintOrder();
+        const auto  SELF  = std::ranges::find(ORDER, workspaceIdx);
+        for (auto it = SELF == ORDER.end() ? ORDER.end() : std::next(SELF); it != ORDER.end(); ++it) {
+            if (!images[*it] || !images[*it]->pWorkspace || workspaceOverviewAlpha(*it) < 0.999F)
+                continue;
+
+            const auto  FRONTBOX   = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), workspaceOverviewOffset(*it, activeIdx, workspacePitch), layout);
+            const float FRONTSTART = VERTICAL ? FRONTBOX.y : FRONTBOX.x;
+            const float FRONTEND   = FRONTSTART + (VERTICAL ? FRONTBOX.height : FRONTBOX.width);
+            if (FRONTEND <= visibleStart || FRONTSTART >= visibleEnd)
+                continue;
+
+            // A front card covers one end of this card (it is never wider
+            // along the axis than a card behind it); keep the other end.
+            if (FRONTSTART - visibleStart > visibleEnd - FRONTEND)
+                visibleEnd = std::min(visibleEnd, FRONTSTART);
+            else
+                visibleStart = std::max(visibleStart, FRONTEND);
+
+            if (visibleEnd <= visibleStart)
+                return; // completely hidden
+        }
+
+        const bool  ATEND     = carouselPosition(workspaceIdx, activeIdx, LOGICALPITCH) > 0.5F;
+        const float AVAILABLE = visibleEnd - visibleStart;
+        const float EXTENT    = VERTICAL ? badgeHeight : rowWidth;
+        float       start     = 0.F;
+        if (AVAILABLE >= EXTENT + PAD * 2.F)
+            start = ATEND ? visibleEnd - PAD - EXTENT : visibleStart + PAD;
+        else if (AVAILABLE >= EXTENT)
+            start = visibleStart + (AVAILABLE - EXTENT) / 2.F;
+        else
+            // Too narrow: keep the badges inside the card, flush with its
+            // visible edge; they overlap the front card rather than vanish.
+            start = ATEND ? CARDEND - EXTENT : CARDSTART;
+
+        if (VERTICAL)
+            y = std::round(start);
+        else {
+            x = std::round(start);
+            // Side by side the row can be far wider than the strip; show what
+            // fits instead of drawing it across the front card.
+            if (AVAILABLE < EXTENT) {
+                x       = std::round(ATEND ? std::max(visibleStart, visibleEnd - EXTENT) : visibleStart);
+                clipBox = CBox{visibleStart, WORKSPACEBOX.y, AVAILABLE, WORKSPACEBOX.height}.round();
+            }
+        }
+    }
+
+    for (const auto& tex : textures) {
         CBox pillBox = {x, y, tex->m_size.x + PAD * 2.F, tex->m_size.y + PAD};
         pillBox.round();
 
         CRectPassElement::SRectData pill;
-        pill.box   = pillBox;
-        pill.color = PILLCOLOR;
-        pill.round = sc<int>(std::round(pillBox.height * 0.3F));
+        pill.box     = pillBox;
+        pill.color   = PILLCOLOR;
+        pill.round   = sc<int>(std::round(pillBox.height * 0.3F));
+        pill.clipBox = clipBox;
         Render::IHyprRenderer::currentPass(g_pHyprRenderer->context()).add(makeUnique<CRectPassElement>(pill));
 
         CTexPassElement::SRenderData text;
-        text.tex = tex;
-        text.box = CBox{pillBox.x + PAD, pillBox.y + PAD / 2.F, tex->m_size.x, tex->m_size.y}.round();
-        text.a   = WORKSPACEALPHA;
+        text.tex     = tex;
+        text.box     = CBox{pillBox.x + PAD, pillBox.y + PAD / 2.F, tex->m_size.x, tex->m_size.y}.round();
+        text.a       = WORKSPACEALPHA;
+        text.clipBox = clipBox;
         Render::IHyprRenderer::currentPass(g_pHyprRenderer->context()).add(makeUnique<CTexPassElement>(text));
 
         x += pillBox.width + PAD / 2.F;
@@ -5979,8 +6049,19 @@ void CScrollOverview::render() {
             renderWorkspaceBackground(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
             OverviewRender::flushPass(g_pHyprRenderer->context(), MONITOR);
             renderWorkspaceLive(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, WALLPAPERMODE, NOW);
-            renderWorkspaceLabel(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE);
         }
+
+        // Labels go in a pass of their own after every card. Queued with the
+        // next card's background, Hyprland's pass simplification culled them
+        // against that card's wallpaper layer: a surface drawn through
+        // render-modif hints reports its opaque region at its unscaled,
+        // full-monitor position, minus only the live blur region of the card
+        // box. Labels outside it were cut wherever the front card's box
+        // happened to fall, changing as the carousel scrolled.
+        OverviewRender::flushPass(g_pHyprRenderer->context(), MONITOR);
+        for (const auto workspaceIdx : cardPaintOrder())
+            renderWorkspaceLabel(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE);
+        OverviewRender::flushPass(g_pHyprRenderer->context(), MONITOR);
     } else {
 
     for (size_t workspaceIdx = 0; workspaceIdx < images.size(); ++workspaceIdx) {
