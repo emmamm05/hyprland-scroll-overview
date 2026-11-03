@@ -397,6 +397,12 @@ static void registerLuaFunctions() {
     HyprlandAPI::addLuaFunction(SCROLLOVERVIEW_HANDLE, "scrolloverview", "configure", ::configureLua);
 }
 
+// 8-bit forms of the colours the overview used to hard-code. A value equal to
+// one of these is drawn with the original float colour, so the defaults look
+// exactly as before (0.42/0.18/0.66 and 0.08 have no exact 8-bit form).
+constexpr ::Config::INTEGER DEFAULT_ACCENT_COLOR    = 0xFF6B2EA8;
+constexpr ::Config::INTEGER DEFAULT_UNCHECKED_COLOR = 0xFF141414;
+
 static void defineConfigValues() {
     using namespace ::Config::Values;
     const auto addValue = [](SP<IValue> value) {
@@ -432,6 +438,17 @@ static void defineConfigValues() {
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:empty_workspace_toggle", "show a \"Show empty workspaces\" checkbox; unchecked hides workspaces without windows", false));
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:label:enabled", "label each workspace card with its number and name", false));
     addValue(makeShared<CIntValue>("plugin:scrolloverview:label:font_size", "workspace label font size", 16, SIntValueOptions{.min = 4, .max = 96}));
+    addValue(makeShared<CColorValue>("plugin:scrolloverview:label:pill_color", "workspace label badge color; its alpha scales the badge opacity", 0xFF000000));
+    addValue(makeShared<CColorValue>("plugin:scrolloverview:label:special_pill_color", "special workspace label badge color; its alpha scales the badge opacity",
+                                     DEFAULT_ACCENT_COLOR));
+    addValue(makeShared<CColorValue>("plugin:scrolloverview:label:text_color", "workspace label text color", 0xFFFFFFFF));
+    addValue(makeShared<CColorValue>("plugin:scrolloverview:toolbar:pill_color", "toolbar badge color; its alpha scales the badge opacity", 0xFF000000));
+    addValue(makeShared<CColorValue>("plugin:scrolloverview:toolbar:text_color", "toolbar text and check mark color", 0xFFFFFFFF));
+    addValue(makeShared<CColorValue>("plugin:scrolloverview:toolbar:outline_color", "toolbar checkbox outline color; its alpha scales the outline opacity", 0xFFFFFFFF));
+    addValue(makeShared<CColorValue>("plugin:scrolloverview:toolbar:checked_color", "toolbar checkbox fill when checked", DEFAULT_ACCENT_COLOR));
+    addValue(makeShared<CColorValue>("plugin:scrolloverview:toolbar:unchecked_color", "toolbar checkbox fill when unchecked", DEFAULT_UNCHECKED_COLOR));
+    addValue(makeShared<CColorValue>("plugin:scrolloverview:drop_indicator:color",
+                                     "drop indicator color; its alpha scales the indicator opacity. Unset follows general:col.active_border", 0xFFFFFFFF));
     addValue(makeShared<CBoolValue>("plugin:scrolloverview:shadow:enabled", "draw a shadow around each workspace card", false));
     addValue(makeShared<CIntValue>("plugin:scrolloverview:shadow:range", "workspace card shadow range", -1));
     addValue(makeShared<CIntValue>("plugin:scrolloverview:shadow:render_power", "workspace card shadow render power", -1));
@@ -590,6 +607,58 @@ int getShadowRange(PHLMONITOR monitor) {
 
 int getShadowRenderPower(PHLMONITOR monitor) {
     return getValue<int>("plugin:scrolloverview:shadow:render_power", monitor);
+}
+
+static CHyprColor getColor(const std::string& name, PHLMONITOR monitor) {
+    const auto VALUE = getValue<::Config::INTEGER>(name, monitor);
+
+    if (VALUE == DEFAULT_ACCENT_COLOR)
+        return CHyprColor{0.42F, 0.18F, 0.66F, 1.F};
+    if (VALUE == DEFAULT_UNCHECKED_COLOR)
+        return CHyprColor{0.08F, 0.08F, 0.08F, 1.F};
+
+    return CHyprColor{sc<uint64_t>(VALUE)};
+}
+
+CHyprColor getLabelPillColor(PHLMONITOR monitor) {
+    return getColor("plugin:scrolloverview:label:pill_color", monitor);
+}
+
+CHyprColor getLabelSpecialPillColor(PHLMONITOR monitor) {
+    return getColor("plugin:scrolloverview:label:special_pill_color", monitor);
+}
+
+CHyprColor getLabelTextColor(PHLMONITOR monitor) {
+    return getColor("plugin:scrolloverview:label:text_color", monitor);
+}
+
+CHyprColor getToolbarPillColor(PHLMONITOR monitor) {
+    return getColor("plugin:scrolloverview:toolbar:pill_color", monitor);
+}
+
+CHyprColor getToolbarTextColor(PHLMONITOR monitor) {
+    return getColor("plugin:scrolloverview:toolbar:text_color", monitor);
+}
+
+CHyprColor getToolbarOutlineColor(PHLMONITOR monitor) {
+    return getColor("plugin:scrolloverview:toolbar:outline_color", monitor);
+}
+
+CHyprColor getToolbarCheckedColor(PHLMONITOR monitor) {
+    return getColor("plugin:scrolloverview:toolbar:checked_color", monitor);
+}
+
+CHyprColor getToolbarUncheckedColor(PHLMONITOR monitor) {
+    return getColor("plugin:scrolloverview:toolbar:unchecked_color", monitor);
+}
+
+std::optional<CHyprColor> getDropIndicatorColor(PHLMONITOR monitor) {
+    constexpr auto NAME = "plugin:scrolloverview:drop_indicator:color";
+
+    if (!monitorValueData(NAME, monitor) && !valueRef<::Config::INTEGER>(NAME).setByUser())
+        return std::nullopt;
+
+    return getColor(NAME, monitor);
 }
 
 std::optional<::Config::CGradientValueData> getShadowColor(PHLMONITOR monitor) {

@@ -45,6 +45,8 @@ end)
 | input | structure | input configuration subcategory; accepts a structure containing the properties listed below | see below |
 | shadow | structure | shadow configuration subcategory; accepts a structure containing the properties listed below | see below |
 | label | structure | workspace label subcategory; accepts a structure containing the properties listed below | see below |
+| toolbar | structure | colors of the **Show empty workspaces** toolbar (`empty_workspace_toggle`); accepts a structure containing the properties listed below | see below |
+| drop_indicator | structure | drop indicator subcategory; accepts a structure containing the properties listed below | see below |
 | carousel | structure | carousel subcategory; accepts a structure containing the properties listed below | see below |
 
 ### Subcategory `input`
@@ -68,6 +70,31 @@ Draws a small label in the top-left corner of each workspace card: a badge with 
 | --- | --- | --- | --- |
 | enabled | bool | label each workspace card | `false` |
 | font_size | int | label font size in logical px, [4–96]; not scaled with the overview, so it stays readable when zoomed out. Uses `misc:font_family` | `16` |
+| pill_color | color | badge color for regular workspaces | `rgba(000000ff)` |
+| special_pill_color | color | badge color for special workspaces | `rgba(6b2ea8ff)` |
+| text_color | color | label text color | `rgba(ffffffff)` |
+
+### Colors
+
+Color options take a Hyprland color string: `"rgba(0969daff)"`, `"rgb(0969da)"`, `"rgba(9, 105, 218, 1.0)"`, `"#0969da"`, `"#0969daff"` or `"0xff0969da"`. The overview already fades badges, outlines and the drop indicator (badges are 55% opaque, 75% on the selected card or a hovered toolbar), and a color's alpha multiplies that opacity, so an opaque color keeps the default look and `rgba(0969da80)` makes the element half as opaque again.
+
+### Subcategory `toolbar`
+
+Colors of the **Show empty workspaces** toolbar drawn by `empty_workspace_toggle`. Its text uses `label.font_size`.
+
+| property | type | description | default |
+| --- | --- | --- | --- |
+| pill_color | color | toolbar badge color | `rgba(000000ff)` |
+| text_color | color | toolbar text and check mark color | `rgba(ffffffff)` |
+| outline_color | color | checkbox outline color | `rgba(ffffffff)` |
+| checked_color | color | checkbox fill when checked | `rgba(6b2ea8ff)` |
+| unchecked_color | color | checkbox fill when unchecked | `rgba(141414ff)` |
+
+### Subcategory `drop_indicator`
+
+| property | type | description | default |
+| --- | --- | --- | --- |
+| color | color | color of the drop indicator shown while dragging a window, drawn at 30% opacity times the color's alpha | first color of `general.col.active_border` |
 
 ### Subcategory `carousel`
 

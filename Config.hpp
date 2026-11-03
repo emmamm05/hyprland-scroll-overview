@@ -120,6 +120,17 @@ int           getCarouselDepth(PHLMONITOR monitor);
 bool          getEmptyWorkspaceToggle(PHLMONITOR monitor);
 bool          getLabelEnabled(PHLMONITOR monitor);
 int           getLabelFontSize(PHLMONITOR monitor);
+// Colours carry their own alpha, which multiplies the opacity the overview
+// computes for that element.
+CHyprColor    getLabelPillColor(PHLMONITOR monitor);
+CHyprColor    getLabelSpecialPillColor(PHLMONITOR monitor);
+CHyprColor    getLabelTextColor(PHLMONITOR monitor);
+CHyprColor    getToolbarPillColor(PHLMONITOR monitor);
+CHyprColor    getToolbarTextColor(PHLMONITOR monitor);
+CHyprColor    getToolbarOutlineColor(PHLMONITOR monitor);
+CHyprColor    getToolbarCheckedColor(PHLMONITOR monitor);
+CHyprColor    getToolbarUncheckedColor(PHLMONITOR monitor);
+std::optional<CHyprColor> getDropIndicatorColor(PHLMONITOR monitor);
 ::Config::CCssGapData getCssGapData(const std::string& name);
 int          getShadowEnabled(PHLMONITOR monitor);
 int          getShadowRange(PHLMONITOR monitor);

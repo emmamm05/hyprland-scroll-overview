@@ -18,7 +18,10 @@ namespace {
 static constexpr float INDICATOR_BASE_SIZE_PX = 200.F;
 static constexpr float INDICATOR_ALPHA   = 0.3F;
 
-static CHyprColor indicatorColor() {
+static CHyprColor indicatorColor(PHLMONITOR monitor) {
+    if (const auto CONFIGURED = ScrollOverview::Config::getDropIndicatorColor(monitor))
+        return CONFIGURED->modifyA(CONFIGURED->a * INDICATOR_ALPHA);
+
     auto* const ACTIVEBORDER = sc<Config::CGradientValueData*>(ScrollOverview::Config::valueRef<Config::IComplexConfigValue>("general:col.active_border").ptr());
     if (!ACTIVEBORDER || ACTIVEBORDER->m_colors.empty())
         return Colors::WHITE.modifyA(INDICATOR_ALPHA);
@@ -135,7 +138,7 @@ void CDropIndicator::renderDropIndicator(const SRenderParams& params) {
 
     CRectPassElement::SRectData data;
     data.box           = BOX;
-    data.color         = indicatorColor();
+    data.color         = indicatorColor(params.monitor);
     data.round         = indicatorRounding(params);
     data.roundingPower = indicatorRoundingPower(params);
 

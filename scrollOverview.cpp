@@ -4717,11 +4717,15 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
     const float PAD        = std::round(FONTPX * 0.5F);
     const auto  FONTFAMILY = ScrollOverview::Config::getValue<std::string>("misc:font_family");
 
-    // Black for regular workspaces, purple for special ones, at the same
-    // opacity; the selected card's badges are a little more opaque.
+    // label:pill_color for regular workspaces (black), special_pill_color for
+    // special ones (purple), at the same opacity scaled by the colour's alpha;
+    // the selected card's badges are a little more opaque.
     const float PILLALPHA = (isSelectedWorkspace(workspaceImage->pWorkspace) ? 0.75F : 0.55F) * WORKSPACEALPHA;
-    const auto  PILLCOLOR =
-        (workspaceImage->pWorkspace->type() == Workspace::eWorkspaceType::SPECIAL) ? CHyprColor{0.42F, 0.18F, 0.66F, PILLALPHA} : CHyprColor{0.F, 0.F, 0.F, PILLALPHA};
+    const auto  PILLBASE  = (workspaceImage->pWorkspace->type() == Workspace::eWorkspaceType::SPECIAL) ? ScrollOverview::Config::getLabelSpecialPillColor(monitor) :
+                                                                                                         ScrollOverview::Config::getLabelPillColor(monitor);
+    const auto  PILLCOLOR = PILLBASE.modifyA(PILLBASE.a * PILLALPHA);
+    const auto  TEXTCOLOR = ScrollOverview::Config::getLabelTextColor(monitor);
+    const auto  TEXTKEY   = std::to_string(TEXTCOLOR.getAsHex());
 
     // In the carousel a card below the middle one peeks out at its bottom
     // edge, so its badges go there; everything else is labelled at the top.
@@ -4734,9 +4738,9 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
 
     float x = WORKSPACEBOX.x + PAD;
     for (const auto& TEXT : overviewWorkspaceLabels(workspaceImage->pWorkspace)) {
-        auto& tex = labelTextures[TEXT + "\n" + std::to_string(FONTPX)];
+        auto& tex = labelTextures[TEXT + "\n" + std::to_string(FONTPX) + "\n" + TEXTKEY];
         if (!tex)
-            tex = g_pHyprRenderer->renderText(TEXT, CHyprColor{1.F, 1.F, 1.F, 1.F}, FONTPX, false, FONTFAMILY, 0, 600);
+            tex = g_pHyprRenderer->renderText(TEXT, TEXTCOLOR, FONTPX, false, FONTFAMILY, 0, 600);
         if (!tex || !tex->ok())
             continue;
 
@@ -4778,10 +4782,13 @@ void CScrollOverview::renderEmptyWorkspaceToggle(PHLMONITOR monitor) {
     const float PAD        = std::round(FONTPX * 0.5F);
     const auto  FONTFAMILY = ScrollOverview::Config::getValue<std::string>("misc:font_family");
 
+    const auto TEXTCOLOR = ScrollOverview::Config::getToolbarTextColor(monitor);
+    const auto TEXTKEY   = std::to_string(TEXTCOLOR.getAsHex());
+
     const auto textureFor = [&](const std::string& text) -> SP<Render::ITexture> {
-        auto& tex = labelTextures[text + "\n" + std::to_string(FONTPX)];
+        auto& tex = labelTextures[text + "\n" + std::to_string(FONTPX) + "\n" + TEXTKEY];
         if (!tex)
-            tex = g_pHyprRenderer->renderText(text, CHyprColor{1.F, 1.F, 1.F, 1.F}, FONTPX, false, FONTFAMILY, 0, 600);
+            tex = g_pHyprRenderer->renderText(text, TEXTCOLOR, FONTPX, false, FONTFAMILY, 0, 600);
         return tex && tex->ok() ? tex : SP<Render::ITexture>{};
     };
 
@@ -4815,7 +4822,8 @@ void CScrollOverview::renderEmptyWorkspaceToggle(PHLMONITOR monitor) {
 
     CRectPassElement::SRectData pill;
     pill.box   = pillBox;
-    pill.color = CHyprColor{0.F, 0.F, 0.F, (HOVERED ? 0.75F : 0.55F) * ALPHA};
+    const auto PILLCOLOR = ScrollOverview::Config::getToolbarPillColor(monitor);
+    pill.color           = PILLCOLOR.modifyA(PILLCOLOR.a * (HOVERED ? 0.75F : 0.55F) * ALPHA);
     pill.round = sc<int>(std::round(pillBox.height * 0.3F));
     Render::IHyprRenderer::currentPass(g_pHyprRenderer->context()).add(makeUnique<CRectPassElement>(pill));
 
@@ -4827,13 +4835,15 @@ void CScrollOverview::renderEmptyWorkspaceToggle(PHLMONITOR monitor) {
 
     CRectPassElement::SRectData outer;
     outer.box   = box;
-    outer.color = CHyprColor{1.F, 1.F, 1.F, 0.9F * ALPHA};
+    const auto OUTLINECOLOR = ScrollOverview::Config::getToolbarOutlineColor(monitor);
+    outer.color             = OUTLINECOLOR.modifyA(OUTLINECOLOR.a * 0.9F * ALPHA);
     outer.round = sc<int>(std::round(BOXSIZE * 0.2F));
     Render::IHyprRenderer::currentPass(g_pHyprRenderer->context()).add(makeUnique<CRectPassElement>(outer));
 
     CRectPassElement::SRectData inner;
     inner.box   = CBox{box.x + BORDER, box.y + BORDER, box.width - BORDER * 2.F, box.height - BORDER * 2.F}.round();
-    inner.color = g_showEmptyWorkspaces ? CHyprColor{0.42F, 0.18F, 0.66F, ALPHA} : CHyprColor{0.08F, 0.08F, 0.08F, ALPHA};
+    const auto FILLCOLOR = g_showEmptyWorkspaces ? ScrollOverview::Config::getToolbarCheckedColor(monitor) : ScrollOverview::Config::getToolbarUncheckedColor(monitor);
+    inner.color          = FILLCOLOR.modifyA(FILLCOLOR.a * ALPHA);
     inner.round = sc<int>(std::max(0.F, std::round(BOXSIZE * 0.2F) - BORDER));
     Render::IHyprRenderer::currentPass(g_pHyprRenderer->context()).add(makeUnique<CRectPassElement>(inner));
 
