@@ -4855,7 +4855,7 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
     }
 }
 
-// WAYLAND / XWAYLAND badge in a window's top-left corner, styled like the
+// WAYLAND / XWAYLAND badge in a window's bottom-left corner, styled like the
 // workspace label badges but in its own colours and the (smaller)
 // label:window_font_size. Queued right after the window, so windows stacked
 // above it cover it too, and clipped to the window and its card.
@@ -4882,7 +4882,10 @@ void CScrollOverview::renderWindowBackendLabel(PHLMONITOR monitor, PHLWINDOW win
         return;
     clipBox.round();
 
-    CBox pillBox = {windowBox.x + PAD / 2.F, windowBox.y + PAD / 2.F, tex->m_size.x + PAD * 2.F, tex->m_size.y + PAD};
+    // Bottom-left: the top-left corner of a card's first window is where the
+    // workspace labels sit.
+    const float PILLH  = tex->m_size.y + PAD;
+    CBox        pillBox = {windowBox.x + PAD / 2.F, windowBox.y + windowBox.height - PAD / 2.F - PILLH, tex->m_size.x + PAD * 2.F, PILLH};
     pillBox.round();
 
     CRectPassElement::SRectData pill;

@@ -73,7 +73,7 @@ Draws a small label in the top-left corner of each workspace card: a badge with 
 | pill_color | color | badge color for regular workspaces | `rgba(000000ff)` |
 | special_pill_color | color | badge color for special workspaces | `rgba(6b2ea8ff)` |
 | text_color | color | label text color | `rgba(ffffffff)` |
-| window_backend | bool | also badge each window in its top-left corner with `WAYLAND` or `XWAYLAND` (clipped to the window, covered by windows stacked above it) | `false` |
+| window_backend | bool | also badge each window in its bottom-left corner (clear of the workspace labels) with `WAYLAND` or `XWAYLAND` (clipped to the window, covered by windows stacked above it) | `false` |
 | window_backend_workspace | string | only badge windows on this workspace, by name or id (`games`, `7`); empty badges every workspace | `""` |
 | window_font_size | int | window badge font size in logical px, [4–96]; not scaled with the overview | `12` |
 | wayland_pill_color | color | `WAYLAND` badge color (80% opaque) | `rgba(2da44eff)` |
