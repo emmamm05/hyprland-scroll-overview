@@ -4698,7 +4698,8 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
     renderDropIndicator();
 }
 
-void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale) {
+void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale,
+                                           const std::vector<size_t>* paintOrder) {
     if (!ScrollOverview::Config::getLabelEnabled(monitor))
         return;
 
@@ -4762,13 +4763,26 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
         const float CARDEND      = CARDSTART + (VERTICAL ? WORKSPACEBOX.height : WORKSPACEBOX.width);
         float       visibleStart = CARDSTART, visibleEnd = CARDEND;
 
-        const auto  ORDER = cardPaintOrder();
+        // render() passes the order it already computed; sorting it again for
+        // every label made each frame O(n^2 log n) in the number of cards.
+        std::vector<size_t> ownOrder;
+        if (!paintOrder) {
+            ownOrder   = cardPaintOrder();
+            paintOrder = &ownOrder;
+        }
+        const auto& ORDER = *paintOrder;
         const auto  SELF  = std::ranges::find(ORDER, workspaceIdx);
         for (auto it = SELF == ORDER.end() ? ORDER.end() : std::next(SELF); it != ORDER.end(); ++it) {
-            if (!images[*it] || !images[*it]->pWorkspace || workspaceOverviewAlpha(*it) < 0.999F)
+            // A card that is still fading in already covers this one: labels
+            // are drawn after every card, so ignoring it until it is fully
+            // opaque put the label on top of it, then made it jump.
+            if (!images[*it] || !images[*it]->pWorkspace || workspaceOverviewAlpha(*it) <= 0.001F)
                 continue;
 
-            const auto  FRONTBOX   = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), workspaceOverviewOffset(*it, activeIdx, workspacePitch), layout);
+            // Its windows too: a scrolling workspace's columns past the card
+            // edges are drawn over the cards behind it (see carouselCardAt).
+            const auto  FRONTCARD  = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), workspaceOverviewOffset(*it, activeIdx, workspacePitch), layout);
+            const auto  FRONTBOX   = workspaceOverviewVisibleBox(*it, FRONTCARD, renderScale, monitor);
             const float FRONTSTART = VERTICAL ? FRONTBOX.y : FRONTBOX.x;
             const float FRONTEND   = FRONTSTART + (VERTICAL ? FRONTBOX.height : FRONTBOX.width);
             if (FRONTEND <= visibleStart || FRONTSTART >= visibleEnd)
@@ -4794,21 +4808,18 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
         else if (AVAILABLE >= EXTENT)
             start = visibleStart + (AVAILABLE - EXTENT) / 2.F;
         else
-            // Too narrow: keep the badges inside the card, flush with its
-            // visible edge; they overlap the front card rather than vanish.
-            start = ATEND ? CARDEND - EXTENT : CARDSTART;
+            // Too narrow: show the part of the badges that fits in the
+            // visible strip, clipped to it. Labels are drawn after every card,
+            // so letting them overflow painted them over the front card.
+            start = ATEND ? std::max(visibleStart, visibleEnd - EXTENT) : visibleStart;
 
         if (VERTICAL)
             y = std::round(start);
-        else {
+        else
             x = std::round(start);
-            // Side by side the row can be far wider than the strip; show what
-            // fits instead of drawing it across the front card.
-            if (AVAILABLE < EXTENT) {
-                x       = std::round(ATEND ? std::max(visibleStart, visibleEnd - EXTENT) : visibleStart);
-                clipBox = CBox{visibleStart, WORKSPACEBOX.y, AVAILABLE, WORKSPACEBOX.height}.round();
-            }
-        }
+
+        if (AVAILABLE < EXTENT)
+            clipBox = (VERTICAL ? CBox{WORKSPACEBOX.x, visibleStart, WORKSPACEBOX.width, AVAILABLE} : CBox{visibleStart, WORKSPACEBOX.y, AVAILABLE, WORKSPACEBOX.height}).round();
     }
 
     for (const auto& tex : textures) {
@@ -6059,8 +6070,9 @@ void CScrollOverview::render() {
         // box. Labels outside it were cut wherever the front card's box
         // happened to fall, changing as the carousel scrolled.
         OverviewRender::flushPass(g_pHyprRenderer->context(), MONITOR);
-        for (const auto workspaceIdx : cardPaintOrder())
-            renderWorkspaceLabel(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE);
+        const auto LABELORDER = cardPaintOrder();
+        for (const auto workspaceIdx : LABELORDER)
+            renderWorkspaceLabel(MONITOR, workspaceIdx, ACTIVEIDX, PITCH, SCALE, &LABELORDER);
         OverviewRender::flushPass(g_pHyprRenderer->context(), MONITOR);
     } else {
 
