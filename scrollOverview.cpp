@@ -4711,12 +4711,18 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
 
 void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale,
                                            const std::vector<size_t>* paintOrder) {
-    if (!ScrollOverview::Config::getLabelEnabled(monitor))
+    if (!ScrollOverview::Config::getLabelEnabled(monitor)) {
+        workspaceLabelBoxes.clear();
         return;
+    }
 
     const auto& workspaceImage = images[workspaceIdx];
     if (!workspaceImage || !workspaceImage->pWorkspace)
         return;
+
+    // Recorded again below if the label is drawn this frame.
+    const void* LABELKEY = workspaceImage->pWorkspace.get();
+    workspaceLabelBoxes.erase(LABELKEY);
 
     const auto WORKSPACEBOX   = getOverviewWorkspaceBox(monitor, renderScale, viewOffset->value(), workspaceOverviewOffset(workspaceIdx, activeIdx, workspacePitch), layout);
     const auto WORKSPACEALPHA = workspaceOverviewAlpha(workspaceIdx);
@@ -4833,9 +4839,21 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
             clipBox = (VERTICAL ? CBox{WORKSPACEBOX.x, visibleStart, WORKSPACEBOX.width, AVAILABLE} : CBox{visibleStart, WORKSPACEBOX.y, AVAILABLE, WORKSPACEBOX.height}).round();
     }
 
+    CBox drawnBox = {};
     for (const auto& tex : textures) {
         CBox pillBox = {x, y, tex->m_size.x + PAD * 2.F, tex->m_size.y + PAD};
         pillBox.round();
+
+        if (drawnBox.empty())
+            drawnBox = pillBox;
+        else {
+            const double RIGHT  = std::max(drawnBox.x + drawnBox.width, pillBox.x + pillBox.width);
+            const double BOTTOM = std::max(drawnBox.y + drawnBox.height, pillBox.y + pillBox.height);
+            drawnBox.x          = std::min(drawnBox.x, pillBox.x);
+            drawnBox.y          = std::min(drawnBox.y, pillBox.y);
+            drawnBox.width      = RIGHT - drawnBox.x;
+            drawnBox.height     = BOTTOM - drawnBox.y;
+        }
 
         CRectPassElement::SRectData pill;
         pill.box     = pillBox;
@@ -4853,12 +4871,19 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
 
         x += pillBox.width + PAD / 2.F;
     }
+
+    if (!clipBox.empty())
+        drawnBox = drawnBox.intersection(clipBox);
+    if (!drawnBox.empty())
+        workspaceLabelBoxes[LABELKEY] = drawnBox;
 }
 
-// WAYLAND / XWAYLAND badge in a window's bottom-left corner, styled like the
+// WAYLAND / XWAYLAND badge in a window's top-left corner, styled like the
 // workspace label badges but in its own colours and the (smaller)
 // label:window_font_size. Queued right after the window, so windows stacked
-// above it cover it too, and clipped to the window and its card.
+// above it cover it too, and clipped to the window and its card. Where it
+// would overlap the card's workspace label (the first window's corner is
+// right under it), it moves down below the label.
 void CScrollOverview::renderWindowBackendLabel(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, const CBox& workspaceBox, float alpha) {
     if (!window || alpha <= 0.001F)
         return;
@@ -4882,10 +4907,16 @@ void CScrollOverview::renderWindowBackendLabel(PHLMONITOR monitor, PHLWINDOW win
         return;
     clipBox.round();
 
-    // Bottom-left: the top-left corner of a card's first window is where the
-    // workspace labels sit.
-    const float PILLH  = tex->m_size.y + PAD;
-    CBox        pillBox = {windowBox.x + PAD / 2.F, windowBox.y + windowBox.height - PAD / 2.F - PILLH, tex->m_size.x + PAD * 2.F, PILLH};
+    CBox pillBox = {windowBox.x + PAD / 2.F, windowBox.y + PAD / 2.F, tex->m_size.x + PAD * 2.F, tex->m_size.y + PAD};
+
+    // Labels are drawn after the windows, so this uses where the workspace
+    // label went last frame; it only moves when the carousel scrolls.
+    if (const auto LABEL = workspaceLabelBoxes.find(window->m_workspace.get()); LABEL != workspaceLabelBoxes.end()) {
+        const auto& LABELBOX = LABEL->second;
+        const CBox  PADDED   = {pillBox.x - PAD / 2.F, pillBox.y - PAD / 2.F, pillBox.width + PAD, pillBox.height + PAD};
+        if (!PADDED.intersection(LABELBOX).empty())
+            pillBox.y = LABELBOX.y + LABELBOX.height + PAD / 2.F;
+    }
     pillBox.round();
 
     CRectPassElement::SRectData pill;

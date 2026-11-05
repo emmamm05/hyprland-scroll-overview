@@ -288,6 +288,9 @@ class CScrollOverview : public IOverview {
     bool                             emptyTogglePressed = false;
     // Rendered workspace labels, keyed by text and pixel size.
     std::unordered_map<std::string, SP<Render::ITexture>> labelTextures;
+    // Where each workspace's label badges were drawn last frame (union,
+    // keyed by workspace), so window badges can step out of their way.
+    std::unordered_map<const void*, CBox> workspaceLabelBoxes;
     SWorkspaceInsertTransition       workspaceInsertTransition;
     PHLWORKSPACEREF                  pendingRemovedWorkspace;
     ScrollOverview::Config::ELayout  layout = ScrollOverview::Config::ELayout::VERTICAL;
