@@ -106,6 +106,7 @@ class CScrollOverview : public IOverview {
     void   renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceIdx, size_t activeIdx, float workspacePitch, float renderScale,
                                 const std::vector<size_t>* paintOrder = nullptr);
     void   renderEmptyWorkspaceToggle(PHLMONITOR monitor);
+    void   renderWindowBackendLabel(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, const CBox& workspaceBox, float alpha);
     bool   handleEmptyWorkspaceToggleButton(const IPointer::SButtonEvent& event);
     bool   hasVisiblePrecomputedBlurWindow(PHLMONITOR monitor, size_t activeIdx, float workspacePitch, float renderScale) const;
     void   renderWindowLive(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, float renderScale, const Time::steady_tp& now, const CBox* workspaceBox = nullptr,

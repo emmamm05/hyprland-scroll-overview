@@ -442,6 +442,14 @@ static void defineConfigValues() {
     addValue(makeShared<CColorValue>("plugin:scrolloverview:label:special_pill_color", "special workspace label badge color; its alpha scales the badge opacity",
                                      DEFAULT_ACCENT_COLOR));
     addValue(makeShared<CColorValue>("plugin:scrolloverview:label:text_color", "workspace label text color", 0xFFFFFFFF));
+    addValue(makeShared<CBoolValue>("plugin:scrolloverview:label:window_backend", "badge each window with WAYLAND or XWAYLAND", false));
+    addValue(makeShared<CStringValue>("plugin:scrolloverview:label:window_backend_workspace",
+                                      "only badge windows on this workspace (name or id); empty badges every workspace", Hyprlang::STRING{""}));
+    addValue(makeShared<CIntValue>("plugin:scrolloverview:label:window_font_size", "window backend badge font size", 12, SIntValueOptions{.min = 4, .max = 96}));
+    addValue(makeShared<CColorValue>("plugin:scrolloverview:label:wayland_pill_color", "WAYLAND badge color; its alpha scales the badge opacity", 0xFF2DA44E));
+    addValue(makeShared<CColorValue>("plugin:scrolloverview:label:wayland_text_color", "WAYLAND badge text color", 0xFFFFFFFF));
+    addValue(makeShared<CColorValue>("plugin:scrolloverview:label:xwayland_pill_color", "XWAYLAND badge color; its alpha scales the badge opacity", 0xFFBF8700));
+    addValue(makeShared<CColorValue>("plugin:scrolloverview:label:xwayland_text_color", "XWAYLAND badge text color", 0xFFFFFFFF));
     addValue(makeShared<CColorValue>("plugin:scrolloverview:toolbar:pill_color", "toolbar badge color; its alpha scales the badge opacity", 0xFF000000));
     addValue(makeShared<CColorValue>("plugin:scrolloverview:toolbar:text_color", "toolbar text and check mark color", 0xFFFFFFFF));
     addValue(makeShared<CColorValue>("plugin:scrolloverview:toolbar:outline_color", "toolbar checkbox outline color; its alpha scales the outline opacity", 0xFFFFFFFF));
@@ -585,6 +593,18 @@ int getLabelFontSize(PHLMONITOR monitor) {
     return getValue<int>("plugin:scrolloverview:label:font_size", monitor);
 }
 
+bool getWindowBackendLabel(PHLMONITOR monitor) {
+    return getValue<bool>("plugin:scrolloverview:label:window_backend", monitor);
+}
+
+std::string getWindowBackendWorkspace(PHLMONITOR monitor) {
+    return getValue<std::string>("plugin:scrolloverview:label:window_backend_workspace", monitor);
+}
+
+int getWindowLabelFontSize(PHLMONITOR monitor) {
+    return getValue<int>("plugin:scrolloverview:label:window_font_size", monitor);
+}
+
 ::Config::CCssGapData getCssGapData(const std::string& name) {
     auto& VALUE = valueRef<::Config::IComplexConfigValue>(name);
     if (!VALUE.good())
@@ -630,6 +650,14 @@ CHyprColor getLabelSpecialPillColor(PHLMONITOR monitor) {
 
 CHyprColor getLabelTextColor(PHLMONITOR monitor) {
     return getColor("plugin:scrolloverview:label:text_color", monitor);
+}
+
+CHyprColor getWindowBackendPillColor(PHLMONITOR monitor, bool xwayland) {
+    return getColor(xwayland ? "plugin:scrolloverview:label:xwayland_pill_color" : "plugin:scrolloverview:label:wayland_pill_color", monitor);
+}
+
+CHyprColor getWindowBackendTextColor(PHLMONITOR monitor, bool xwayland) {
+    return getColor(xwayland ? "plugin:scrolloverview:label:xwayland_text_color" : "plugin:scrolloverview:label:wayland_text_color", monitor);
 }
 
 CHyprColor getToolbarPillColor(PHLMONITOR monitor) {

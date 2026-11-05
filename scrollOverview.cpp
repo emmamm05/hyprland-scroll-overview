@@ -4621,6 +4621,15 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
             workspace->m_alpha->value() = PREVIOUSALPHA;
     });
 
+    // label:window_backend, optionally limited to one workspace by name or id.
+    const bool SHOWBACKEND = [&] {
+        if (!ScrollOverview::Config::getWindowBackendLabel(monitor))
+            return false;
+        const auto ONLY = ScrollOverview::Config::getWindowBackendWorkspace(monitor);
+        const auto NUMBER = workspace->numberedID();
+        return ONLY.empty() || ONLY == workspace->displayName() || (NUMBER && ONLY == std::to_string(*NUMBER));
+    }();
+
     const auto renderOverviewWindow = [&](const PHLWINDOW& window) {
         if (!shouldShowOverviewWindow(window))
             return;
@@ -4632,6 +4641,8 @@ void CScrollOverview::renderWorkspaceLive(PHLMONITOR monitor, size_t workspaceId
             return;
 
         renderWindowLive(monitor, window, windowBox, CARDSCALE, now, &WORKSPACEBOX);
+        if (SHOWBACKEND)
+            renderWindowBackendLabel(monitor, window, windowBox, VISIBLEBOX, workspaceOverviewAlpha(workspaceIdx));
     };
 
     const auto fullscreenWindow = getOverviewWindowToShow(Fullscreen::controller()->getFullscreenWindow(workspace));
@@ -4842,6 +4853,51 @@ void CScrollOverview::renderWorkspaceLabel(PHLMONITOR monitor, size_t workspaceI
 
         x += pillBox.width + PAD / 2.F;
     }
+}
+
+// WAYLAND / XWAYLAND badge in a window's top-left corner, styled like the
+// workspace label badges but in its own colours and the (smaller)
+// label:window_font_size. Queued right after the window, so windows stacked
+// above it cover it too, and clipped to the window and its card.
+void CScrollOverview::renderWindowBackendLabel(PHLMONITOR monitor, PHLWINDOW window, const CBox& windowBox, const CBox& workspaceBox, float alpha) {
+    if (!window || alpha <= 0.001F)
+        return;
+
+    const bool  ISX11      = window->backend().isX11();
+    const int   FONTPX     = std::max(1, sc<int>(std::round(ScrollOverview::Config::getWindowLabelFontSize(monitor) * monitor->m_scale)));
+    const float PAD        = std::round(FONTPX * 0.5F);
+    const auto  FONTFAMILY = ScrollOverview::Config::getValue<std::string>("misc:font_family");
+    const auto  TEXT       = std::string{ISX11 ? "XWAYLAND" : "WAYLAND"};
+    const auto  TEXTCOLOR  = ScrollOverview::Config::getWindowBackendTextColor(monitor, ISX11);
+    const auto  PILLBASE   = ScrollOverview::Config::getWindowBackendPillColor(monitor, ISX11);
+
+    auto& tex = labelTextures[TEXT + "\n" + std::to_string(FONTPX) + "\n" + std::to_string(TEXTCOLOR.getAsHex())];
+    if (!tex)
+        tex = g_pHyprRenderer->renderText(TEXT, TEXTCOLOR, FONTPX, false, FONTFAMILY, 0, 700);
+    if (!tex || !tex->ok())
+        return;
+
+    CBox clipBox = windowBox.intersection(workspaceBox);
+    if (clipBox.empty())
+        return;
+    clipBox.round();
+
+    CBox pillBox = {windowBox.x + PAD / 2.F, windowBox.y + PAD / 2.F, tex->m_size.x + PAD * 2.F, tex->m_size.y + PAD};
+    pillBox.round();
+
+    CRectPassElement::SRectData pill;
+    pill.box     = pillBox;
+    pill.color   = PILLBASE.modifyA(PILLBASE.a * 0.8F * alpha);
+    pill.round   = sc<int>(std::round(pillBox.height * 0.3F));
+    pill.clipBox = clipBox;
+    Render::IHyprRenderer::currentPass(g_pHyprRenderer->context()).add(makeUnique<CRectPassElement>(pill));
+
+    CTexPassElement::SRenderData text;
+    text.tex     = tex;
+    text.box     = CBox{pillBox.x + PAD, pillBox.y + PAD / 2.F, tex->m_size.x, tex->m_size.y}.round();
+    text.a       = alpha;
+    text.clipBox = clipBox;
+    Render::IHyprRenderer::currentPass(g_pHyprRenderer->context()).add(makeUnique<CTexPassElement>(text));
 }
 
 // "Show empty workspaces" checkbox, styled like the workspace label badges and
